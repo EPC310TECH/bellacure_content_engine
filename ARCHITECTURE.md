@@ -1,4 +1,4 @@
-# BellaCure Salon Content Pipeline
+# Bellacures Salon Content Pipeline
 
 ## Goal
 

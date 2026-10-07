@@ -1,5 +1,5 @@
 -- Run after creating the first leadership user in Supabase Auth.
--- Replace this email and the seven location labels before running.
+-- Replace this email before running.
 do $$
 declare
   owner_email text := 'owner@example.com';
@@ -7,13 +7,13 @@ declare
   salon_id uuid;
   location_id uuid;
   location_names text[] := array[
-    'Location 01',
-    'Location 02',
-    'Location 03',
-    'Location 04',
-    'Location 05',
-    'Location 06',
-    'Location 07'
+    'Beverly Hills',
+    'Brentwood Village',
+    'Larchmont Village',
+    'Santa Monica',
+    'South Bay',
+    'Studio City',
+    'Sunset'
   ];
   location_number integer;
 begin
@@ -28,13 +28,19 @@ begin
 
   select id into salon_id
   from public.salon_accounts
-  where name = 'BellaCure'
-  order by created_at
+  where name in ('Bellacures', 'BellaCure')
+  order by case when name = 'Bellacures' then 0 else 1 end, created_at
   limit 1;
+
+  if salon_id is not null then
+    update public.salon_accounts
+    set name = 'Bellacures'
+    where id = salon_id and name <> 'Bellacures';
+  end if;
 
   if salon_id is null then
     insert into public.salon_accounts (name)
-    values ('BellaCure')
+    values ('Bellacures')
     returning id into salon_id;
   end if;
 

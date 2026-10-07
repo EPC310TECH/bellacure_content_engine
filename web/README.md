@@ -4,7 +4,7 @@ The MVP provides a technician media dashboard and a leadership job/review dashbo
 
 1. Create a Supabase project.
 2. Disable public user sign-ups in Supabase Auth settings. Require confirmed email addresses and strong passwords for invited users. Run `supabase/migrations/20261007005446_salon_content_mvp.sql` in the Supabase SQL Editor.
-3. Create the initial leadership user in Supabase Auth. Edit `supabase/bootstrap.sql` with that user's email and actual branch names, then run it in the SQL Editor.
+3. Create the initial leadership user in Supabase Auth. Edit `supabase/bootstrap.sql` with that user's email, then run it in the SQL Editor. The script provisions Beverly Hills, Brentwood Village, Larchmont Village, Santa Monica, South Bay, Studio City, and Sunset.
 4. Copy `.env.example` to `.env.local` and fill in the Supabase project URL and publishable key. The publishable key is intended for browser use; never place a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
 5. From this directory, run `npm run dev` and open the local address printed by Next.js. Sign in with the leadership account or a technician account added to `location_memberships`.
 
@@ -16,4 +16,4 @@ The first migration creates the private `salon-media` bucket, location-scoped RL
 - **Next:** Worker queue and deterministic photo-composition worker; generated output and leadership review actions.
 - **Not connected:** Stripe, AI services, automated TikTok publishing. The launch path uses manual export.
 
-The bootstrap SQL creates placeholder locations. Set actual location labels before inviting technicians and provision technician memberships explicitly in the Supabase SQL Editor.
+The bootstrap SQL provisions the seven Bellacures locations and a leadership membership. Provision technician memberships explicitly in the Supabase SQL Editor.

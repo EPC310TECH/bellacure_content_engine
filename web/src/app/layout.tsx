@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BellaCure Content Studio",
+  title: "Bellacures Content Studio",
   description: "A thoughtful content studio for the craft of nail care.",
 };
 

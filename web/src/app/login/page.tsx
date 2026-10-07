@@ -36,7 +36,7 @@ export default function LoginPage() {
   return (
     <main className="login-shell">
       <section className="login-aside">
-        <Link className="login-brand" href="/"><span className="brand-mark"><Flower2 size={22} /></span><span><strong>bellacure</strong><small>CONTENT STUDIO</small></span></Link>
+        <Link className="login-brand" href="/"><span className="brand-mark"><Flower2 size={22} /></span><span><strong>bellacures</strong><small>CONTENT STUDIO</small></span></Link>
         <div className="login-art">
           <div className="login-orbit login-orbit-one" /><div className="login-orbit login-orbit-two" />
           <div className="login-hand">

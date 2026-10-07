@@ -53,9 +53,19 @@ type ContentJob = {
   media_asset_id: string;
 };
 
-const demoLocations: Location[] = Array.from({ length: 7 }, (_, index) => ({
+const locationNames = [
+  "Beverly Hills",
+  "Brentwood Village",
+  "Larchmont Village",
+  "Santa Monica",
+  "South Bay",
+  "Studio City",
+  "Sunset",
+];
+
+const demoLocations: Location[] = locationNames.map((name, index) => ({
   id: `demo-${index + 1}`,
-  name: `Salon location ${String(index + 1).padStart(2, "0")}`,
+  name,
   role: index === 0 ? "leadership" : "technician",
 }));
 
@@ -66,9 +76,9 @@ const demoAssets: Asset[] = [
 ];
 
 const sampleJobs = [
-  { title: "Cherry glaze close-up", location: "Beverly Grove", status: "Ready for review", color: "rose", time: "12 min ago", initials: "BG" },
-  { title: "Soft chrome, autumn light", location: "West Hollywood", status: "Composing", color: "lilac", time: "34 min ago", initials: "WH" },
-  { title: "A little fall in love", location: "Silver Lake", status: "Awaiting photos", color: "amber", time: "1 hr ago", initials: "SL" },
+  { title: "Cherry glaze close-up", location: "Beverly Hills", status: "Ready for review", color: "rose", time: "12 min ago", initials: "BH" },
+  { title: "Soft chrome, autumn light", location: "Santa Monica", status: "Composing", color: "lilac", time: "34 min ago", initials: "SM" },
+  { title: "A little fall in love", location: "Studio City", status: "Awaiting photos", color: "amber", time: "1 hr ago", initials: "SC" },
 ];
 
 function formatDate(date: string) {
@@ -315,7 +325,7 @@ export default function Home() {
       <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-mark"><Flower2 size={22} strokeWidth={1.7} /></div>
-          <div><strong>bellacure</strong><span>CONTENT STUDIO</span></div>
+          <div><strong>bellacures</strong><span>CONTENT STUDIO</span></div>
           <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setMobileMenu(false)}><X size={19} /></button>
         </div>
 
@@ -376,7 +386,7 @@ export default function Home() {
         <div className="page-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow"><span className="eyebrow-dot" /> BELLACURE STUDIO <span className="eyebrow-slash">/</span> {currentLocation?.name.toUpperCase() ?? "YOUR WORKSPACE"}</div>
+              <div className="eyebrow"><span className="eyebrow-dot" /> BELLACURES STUDIO <span className="eyebrow-slash">/</span> {currentLocation?.name.toUpperCase() ?? "YOUR WORKSPACE"}</div>
               <h1>{sectionTitle[section]}</h1>
               <p className="heading-subtitle">{section === "overview" ? "The beautiful work you do, ready for its next little moment." : section === "uploads" ? "Your original work, kept lovely and exactly as you made it." : section === "jobs" ? "Every idea and edit, all in one thoughtful little queue." : "Thoughtful themes, timed for what’s just around the corner."}</p>
             </div>
@@ -590,7 +600,7 @@ function CalendarView({ isDemo }: { isDemo: boolean }) {
 function SettingsView({ isDemo, configured }: { isDemo: boolean; configured: boolean }) {
   return (
     <div className="settings-layout">
-      <section className="content-card settings-card"><span className="card-kicker">WORKSPACE</span><h2>Your studio details</h2><div className="setting-row"><div className="setting-icon"><Flower2 size={17} /></div><div><strong>BellaCure Content Studio</strong><span>{isDemo ? "Preview workspace" : "Connected salon account"}</span></div><button className="button-secondary" disabled>Edit details</button></div><div className="setting-row"><div className="setting-icon"><Grid2X2 size={17} /></div><div><strong>Locations</strong><span>Seven salon locations</span></div><button className="button-secondary" disabled>Manage</button></div><div className="setting-row"><div className="setting-icon"><ShieldCheck size={17} /></div><div><strong>Permissions</strong><span>Technicians upload · leadership reviews</span></div><button className="button-secondary" disabled>View roles</button></div></section>
+      <section className="content-card settings-card"><span className="card-kicker">WORKSPACE</span><h2>Your studio details</h2><div className="setting-row"><div className="setting-icon"><Flower2 size={17} /></div><div><strong>Bellacures Content Studio</strong><span>{isDemo ? "Preview workspace" : "Connected salon account"}</span></div><button className="button-secondary" disabled>Edit details</button></div><div className="setting-row"><div className="setting-icon"><Grid2X2 size={17} /></div><div><strong>Locations</strong><span>Seven salon locations</span></div><button className="button-secondary" disabled>Manage</button></div><div className="setting-row"><div className="setting-icon"><ShieldCheck size={17} /></div><div><strong>Permissions</strong><span>Technicians upload · leadership reviews</span></div><button className="button-secondary" disabled>View roles</button></div></section>
       <section className="content-card settings-card"><span className="card-kicker">CONNECTIONS</span><h2>Made to work together.</h2><ConnectionRow icon={<Flower2 size={18} />} name="Supabase" detail={configured ? "Project connected" : "Connect your project to enable sign-in and storage"} active={configured} />
         <ConnectionRow icon={<WandSparkles size={18} />} name="Photo composition" detail="Deterministic edits · worker not connected" active={false} />
         <ConnectionRow icon={<Video size={18} />} name="TikTok publishing" detail="Manual export for MVP · API review later" active={false} />
@@ -608,7 +618,7 @@ function ReviewPreview({ onClose }: { onClose: () => void }) {
       <div className="review-preview-banner"><Sparkles size={14} /> Sample-only review flow. No actual video is generated, approved, or published.</div>
       <div className="review-body">
         <div className="review-video-poster"><div className="review-poster-glow" /><DecorativeNails variant={0} /><span className="review-duration">0:05</span><span className="review-play"><Play size={18} fill="currentColor" /></span><span className="poster-caption">STILL PHOTO COMPOSITION PREVIEW</span></div>
-        <div className="review-details"><div className="review-detail-row"><span>LOCATION</span><strong>Beverly Grove</strong></div><div className="review-detail-row"><span>THEME</span><strong>Autumn glow · warm cherry</strong></div><div className="review-detail-row"><span>CREATIVE TREATMENT</span><strong>Slow macro push-in · soft ambient light</strong></div><div className="review-guardrail"><ShieldCheck size={16} /><span>Original nail color and design stay the source of truth. No generated text or speech.</span></div></div>
+        <div className="review-details"><div className="review-detail-row"><span>LOCATION</span><strong>Beverly Hills</strong></div><div className="review-detail-row"><span>THEME</span><strong>Autumn glow · warm cherry</strong></div><div className="review-detail-row"><span>CREATIVE TREATMENT</span><strong>Slow macro push-in · soft ambient light</strong></div><div className="review-guardrail"><ShieldCheck size={16} /><span>Original nail color and design stay the source of truth. No generated text or speech.</span></div></div>
       </div>
       <footer className="review-dialog-footer"><span>{approved ? <><Check size={15} /> Preview approval noted locally only</> : "Leadership approval required before export."}</span><div><button className="button-secondary" onClick={onClose}>{approved ? "Close" : "Request changes"}</button><button className="button-primary" onClick={() => setApproved(true)} disabled={approved}><BadgeCheck size={15} />{approved ? "Preview approved" : "Approve preview"}</button></div></footer>
     </section>
