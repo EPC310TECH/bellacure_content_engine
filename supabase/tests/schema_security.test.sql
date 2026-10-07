@@ -1,6 +1,6 @@
 begin;
 
-select plan(26);
+select plan(30);
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.salon_accounts'::regclass),
@@ -106,6 +106,21 @@ select ok(
   not has_table_privilege('authenticated', 'public.content_jobs', 'UPDATE'),
   'clients cannot change job state outside the guarded review function'
 );
-
+select ok(
+  (select relrowsecurity from pg_class where oid = 'public.content_schedule_entries'::regclass),
+  'content_schedule_entries has row-level security enabled'
+);
+select ok(
+  not has_table_privilege('anon', 'public.content_schedule_entries', 'SELECT'),
+  'anonymous users cannot read content schedules'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.content_schedule_entries', 'SELECT'),
+  'authenticated users can read schedules subject to location RLS'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.content_schedule_entries', 'INSERT'),
+  'clients cannot modify the provisioned content schedule'
+);
 select * from finish();
 rollback;

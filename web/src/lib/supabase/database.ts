@@ -16,6 +16,30 @@ export type Database = {
         { id: string; salon_account_id: string; name: string; timezone: string; created_at: string },
         { id?: string; salon_account_id: string; name: string; timezone?: string; created_at?: string }
       >;
+      content_schedule_entries: Table<
+        {
+          id: string;
+          location_id: string;
+          cycle_number: number;
+          scheduled_for: string;
+          season: "Fall" | "Winter" | "Spring" | "Summer";
+          style_name: string;
+          technique_and_finish: string;
+          color_palette: string;
+          created_at: string;
+        },
+        {
+          id?: string;
+          location_id: string;
+          cycle_number: number;
+          scheduled_for: string;
+          season: "Fall" | "Winter" | "Spring" | "Summer";
+          style_name: string;
+          technique_and_finish: string;
+          color_palette: string;
+          created_at?: string;
+        }
+      >;
       location_memberships: Table<
         { id: string; location_id: string; user_id: string; role: "technician" | "leadership"; created_at: string },
         { id?: string; location_id: string; user_id: string; role: "technician" | "leadership"; created_at?: string }

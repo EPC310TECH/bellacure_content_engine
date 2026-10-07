@@ -8,6 +8,8 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Clock3,
   CloudUpload,
@@ -33,6 +35,7 @@ import { useRouter } from "next/navigation";
 import { ChangeEvent, DragEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { demoSchedule, type ScheduleEntry } from "@/lib/content-schedule";
 
 type Section = "overview" | "uploads" | "jobs" | "calendar" | "settings";
 type Location = { id: string; name: string; role: string };
@@ -91,6 +94,19 @@ function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(date));
 }
 
+function formatScheduleDate(date: string, options: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" }) {
+  return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function todayInLosAngeles() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function StatusPill({ status }: { status: string }) {
   const style = status === "ready" || status === "Ready for review"
     ? "status-ready"
@@ -108,6 +124,7 @@ export default function Home() {
   const [locations, setLocations] = useState<Location[]>(configured ? [] : demoLocations);
   const [locationId, setLocationId] = useState(configured ? "" : demoLocations[0].id);
   const [assets, setAssets] = useState<Asset[]>(configured ? [] : demoAssets);
+  const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>(configured ? [] : demoSchedule(demoLocations.map((location) => location.id)));
   const [jobs, setJobs] = useState<ContentJob[]>([]);
   const [userName, setUserName] = useState(configured ? "" : "Alex Morgan");
   const [loading, setLoading] = useState(configured);
@@ -185,6 +202,16 @@ export default function Home() {
       setErrorMessage(`Could not load the content queue: ${jobsError.message}`);
     } else {
       setJobs(jobRows ?? []);
+    }
+    const { data: scheduleRows, error: scheduleError } = await supabase
+      .from("content_schedule_entries")
+      .select("id, location_id, cycle_number, scheduled_for, season, style_name, technique_and_finish, color_palette")
+      .in("location_id", ids)
+      .order("scheduled_for");
+    if (scheduleError) {
+      setErrorMessage(`Could not load the content calendar: ${scheduleError.message}`);
+    } else {
+      setScheduleEntries(scheduleRows ?? []);
     }
     setLoading(false);
   }, [router, supabase]);
@@ -409,6 +436,7 @@ export default function Home() {
               isLeadership={isLeadership || isDemo}
               assets={selectedAssets}
               jobs={jobs.filter((job) => job.location_id === locationId)}
+              scheduleEntries={scheduleEntries.filter((entry) => entry.location_id === locationId)}
               uploading={uploading}
               uploadMessage={uploadMessage}
               errorMessage={errorMessage}
@@ -421,6 +449,7 @@ export default function Home() {
               onUpload={() => document.getElementById("media-upload")?.click()}
               onJobs={() => setSection("jobs")}
               onUploads={() => setSection("uploads")}
+              onCalendar={() => setSection("calendar")}
             />
           )}
           {section === "uploads" && (
@@ -440,7 +469,7 @@ export default function Home() {
             />
           )}
           {section === "jobs" && <Jobs isDemo={isDemo} isLeadership={isLeadership || isDemo} jobs={isLeadership ? jobs : jobs.filter((job) => job.location_id === locationId)} assets={assets} locations={locations} onReview={(job) => job ? setReviewJob(job) : setReviewPreviewOpen(true)} />}
-          {section === "calendar" && <CalendarView isDemo={isDemo} />}
+          {section === "calendar" && <CalendarView isDemo={isDemo} entries={scheduleEntries.filter((entry) => entry.location_id === locationId)} locationName={currentLocation?.name ?? "Selected location"} />}
           {section === "settings" && <SettingsView isDemo={isDemo} configured={configured} />}
         </div>
         <footer className="page-footer"><span>Made with care for the work you do.</span><span><ShieldCheck size={14} /> Your originals always stay yours</span></footer>
@@ -504,11 +533,12 @@ function UploadDropzone({ isDemo, uploading, uploadMessage, errorMessage, consen
   );
 }
 
-function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob[]; onJobs: () => void; onUploads: () => void }) {
+function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob[]; scheduleEntries: ScheduleEntry[]; onJobs: () => void; onUploads: () => void; onCalendar: () => void }) {
   const ready = props.assets.filter((asset) => asset.status === "ready").length;
   const queueCount = props.isDemo ? 3 : props.jobs.filter((job) => job.status !== "approved" && job.status !== "rejected").length;
   const reviewCount = props.jobs.filter((job) => job.status === "ready_for_review").length;
   const approvedCount = props.jobs.filter((job) => job.status === "approved").length;
+  const nextTheme = props.scheduleEntries.find((entry) => entry.scheduled_for >= todayInLosAngeles());
   return (
     <>
       <div className="stats-grid">
@@ -530,16 +560,19 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
 
         <section className="content-card schedule-card">
           {props.isDemo ? <>
-            <div className="section-card-top"><div><span className="card-kicker">COMING UP · SAMPLE</span><h2>A little autumn glow</h2></div><button className="more-button" aria-label="More options"><MoreHorizontal size={19} /></button></div>
+            <div className="section-card-top"><div><span className="card-kicker">COMING UP · SAMPLE</span><h2>{nextTheme?.style_name ?? "Theme schedule"}</h2></div><button className="more-button" aria-label="More options"><MoreHorizontal size={19} /></button></div>
             <div className="season-art"><div className="season-sun" /><div className="season-orbit orbit-one" /><div className="season-orbit orbit-two" /><div className="nail-shape nail-one" /><div className="nail-shape nail-two" /><div className="nail-shape nail-three" /><span className="season-caption">soft light <i>·</i> warm tones <i>·</i> you</span></div>
-            <div className="schedule-meta"><span><CalendarDays size={15} /> October 10</span><span className="schedule-dot" /><span>Sample theme</span></div>
-            <p className="schedule-description">A slow, close-up look at your favorite autumn set. No fuss, just the details.</p>
-            <button className="card-link" onClick={props.onJobs}>See sample queue <ArrowRight size={15} /></button>
+            <div className="schedule-meta"><span><CalendarDays size={15} /> {nextTheme ? formatScheduleDate(nextTheme.scheduled_for) : "Schedule complete"}</span><span className="schedule-dot" /><span>{nextTheme ? `Cycle ${nextTheme.cycle_number} · ${nextTheme.season}` : "Sample theme"}</span></div>
+            <p className="schedule-description">{nextTheme ? `${nextTheme.technique_and_finish} · ${nextTheme.color_palette}` : "The 18-cycle shared content calendar is ready to explore."}</p>
+            <button className="card-link" onClick={props.onCalendar}>Open content calendar <ArrowRight size={15} /></button>
           </> : <>
-            <div className="section-card-top"><div><span className="card-kicker">SCHEDULE</span><h2>Your next theme starts here.</h2></div><CalendarDays size={18} color="#a17a86" /></div>
-            <div className="season-art schedule-empty"><CalendarDays size={24} /><span>No schedule configured</span></div>
-            <p className="schedule-description">Calendar themes will appear after schedules and the background worker are connected.</p>
-            <button className="card-link" onClick={props.onJobs}>View setup status <ArrowRight size={15} /></button>
+            <div className="section-card-top"><div><span className="card-kicker">CONTENT CALENDAR</span><h2>{nextTheme?.style_name ?? "Schedule not loaded yet"}</h2></div><CalendarDays size={18} color="#a17a86" /></div>
+            {nextTheme ? <>
+              <div className="season-art schedule-empty"><span className="schedule-theme-number">CYCLE {nextTheme.cycle_number}</span><strong>{nextTheme.season}</strong><span>{nextTheme.color_palette}</span></div>
+              <div className="schedule-meta"><span><CalendarDays size={15} /> {formatScheduleDate(nextTheme.scheduled_for)}</span><span className="schedule-dot" /><span>Every 3 weeks</span></div>
+              <p className="schedule-description">{nextTheme.technique_and_finish}</p>
+            </> : <div className="season-art schedule-empty"><CalendarDays size={24} /><span>Run the calendar bootstrap to load all 18 themes.</span></div>}
+            <button className="card-link" onClick={props.onCalendar}>Open content calendar <ArrowRight size={15} /></button>
           </>}
         </section>
       </div>
@@ -630,22 +663,60 @@ function Jobs({ isDemo, isLeadership, jobs, assets, locations, onReview }: { isD
   );
 }
 
-function CalendarView({ isDemo }: { isDemo: boolean }) {
-  if (!isDemo) {
-    return <section className="content-card"><span className="card-kicker">SCHEDULE SETUP</span><h2>Calendar themes are coming next.</h2><p className="heading-subtitle">The calendar view will show salon schedules and verified Los Angeles events after the scheduler and worker are connected.</p><EmptyState icon={<CalendarDays size={20} />} title="No schedules configured yet" description="Nothing will be generated on a schedule until leadership configures one." /></section>;
+function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entries: ScheduleEntry[]; locationName: string }) {
+  const [month, setMonth] = useState(() => new Date(Date.UTC(2026, 9, 1)));
+  const [selectedDate, setSelectedDate] = useState("2026-10-06");
+  const year = month.getUTCFullYear();
+  const monthIndex = month.getUTCMonth();
+  const firstWeekday = (new Date(Date.UTC(year, monthIndex, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+  const monthCells = Array.from({ length: cellCount }, (_, index) => {
+    const date = new Date(Date.UTC(year, monthIndex, index - firstWeekday + 1));
+    return { date: date.toISOString().slice(0, 10), day: date.getUTCDate(), inMonth: date.getUTCMonth() === monthIndex };
+  });
+  const entriesByDate = new Map(entries.map((entry) => [entry.scheduled_for, entry]));
+  const selectedEntry = entriesByDate.get(selectedDate);
+  const nextEntries = entries.filter((entry) => entry.scheduled_for >= todayInLosAngeles()).slice(0, 3);
+  const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(month);
+
+  function moveMonth(amount: number) {
+    setMonth((current) => new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + amount, 1)));
   }
+
   return (
     <div className="calendar-layout">
       <section className="content-card calendar-card">
-        <div className="list-heading"><div><span className="card-kicker">OCTOBER 2026</span><h2>A season for the details.</h2><p>Your themes are just a starting point. Your work makes them yours.</p></div><button className="button-secondary"><CalendarDays size={15} /> Month view</button></div>
-        <div className="calendar-grid">{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((day) => <span className="weekday" key={day}>{day}</span>)}{Array.from({ length: 35 }, (_, index) => {
-          const day = index - 2;
-          const valid = day > 0 && day <= 31;
-          const event = isDemo && [10, 17, 24, 31].includes(day);
-          return <div className={`calendar-day ${!valid ? "day-muted" : ""} ${day === 6 ? "day-today" : ""}`} key={index}>{valid ? day : day < 1 ? 30 + day : day - 31}{event && <span className="calendar-event">{day === 10 ? "Autumn glow" : day === 17 ? "Chrome story" : day === 24 ? "Soft seasonal" : "Your next set"}</span>}</div>;
-        })}</div>
+        <div className="list-heading">
+          <div><span className="card-kicker">{isDemo ? "SAMPLE CONTENT SCHEDULE" : `${locationName.toUpperCase()} · CONTENT SCHEDULE`}</span><h2>{monthLabel}</h2><p>One salon theme every three weeks · shared across all seven locations.</p></div>
+          <div className="calendar-controls">
+            <button className="icon-button" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={17} /></button>
+            <button className="icon-button" aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={17} /></button>
+          </div>
+        </div>
+        <div className="calendar-grid">{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((day) => <span className="weekday" key={day}>{day}</span>)}
+          {monthCells.map((cell) => {
+            const entry = entriesByDate.get(cell.date);
+            return <button type="button" className={`calendar-day ${!cell.inMonth ? "day-muted" : ""} ${cell.date === todayInLosAngeles() ? "day-today" : ""} ${cell.date === selectedDate ? "day-selected" : ""}`} key={cell.date} onClick={() => setSelectedDate(cell.date)}>
+              <span>{cell.day}</span>{entry && <span className="calendar-event">C{entry.cycle_number} · {entry.style_name}</span>}
+            </button>;
+          })}
+        </div>
+        {isDemo && <div className="calendar-sample-note"><Sparkles size={14} /> Sample schedule preview. Apply the calendar migration and rerun bootstrap to load this schedule in Supabase.</div>}
+        {!isDemo && entries.length === 0 && <div className="calendar-sample-note"><CircleHelp size={14} /> No schedule entries were found for this location. Apply the calendar migration, then rerun <code>supabase/bootstrap.sql</code>.</div>}
       </section>
-      <aside className="content-card moments-card"><span className="card-kicker">UP NEXT</span><h2>Little moments worth sharing.</h2><div className="moment-item"><div className="moment-date"><strong>10</strong><span>OCT</span></div><div><strong>Autumn glow</strong><span>Still-photo edit · 1 location</span></div><span className="moment-indicator" /></div><div className="moment-item"><div className="moment-date"><strong>17</strong><span>OCT</span></div><div><strong>Chrome story</strong><span>Seasonal color · 2 locations</span></div><span className="moment-indicator moment-indicator-lilac" /></div><div className="calendar-hint"><Sparkles size={16} /><p>{isDemo ? "Connect your calendar and content schedule when the project is configured." : "Your scheduled themes will appear here once schedules are set up."}</p></div></aside>
+      <aside className="content-card moments-card">
+        <span className="card-kicker">{selectedEntry ? `CYCLE ${selectedEntry.cycle_number} · ${selectedEntry.season.toUpperCase()}` : "UP NEXT"}</span>
+        <h2>{selectedEntry?.style_name ?? "Upcoming themes"}</h2>
+        {selectedEntry ? <div className="selected-theme">
+          <div className="moment-item"><div className="moment-date"><strong>{formatScheduleDate(selectedEntry.scheduled_for, { day: "numeric" })}</strong><span>{formatScheduleDate(selectedEntry.scheduled_for, { month: "short" }).toUpperCase()}</span></div><div><strong>{formatScheduleDate(selectedEntry.scheduled_for, { weekday: "long", year: "numeric" })}</strong><span>Los Angeles · every 3 weeks</span></div></div>
+          <div className="theme-detail"><span>TECHNIQUE & FINISH</span><strong>{selectedEntry.technique_and_finish}</strong></div>
+          <div className="theme-detail"><span>COLOR PALETTE</span><strong>{selectedEntry.color_palette}</strong></div>
+        </div> : nextEntries.map((entry) => <button className="moment-item moment-button" key={entry.id} onClick={() => { setSelectedDate(entry.scheduled_for); setMonth(new Date(`${entry.scheduled_for}T00:00:00.000Z`)); }}>
+          <div className="moment-date"><strong>{formatScheduleDate(entry.scheduled_for, { day: "numeric" })}</strong><span>{formatScheduleDate(entry.scheduled_for, { month: "short" }).toUpperCase()}</span></div><div><strong>{entry.style_name}</strong><span>Cycle {entry.cycle_number} · {entry.season} · {entry.color_palette}</span></div><span className="moment-indicator" />
+        </button>)}
+        <div className="calendar-hint"><CalendarDays size={16} /><p>{entries.length ? "These are content-planning dates, not customer appointment bookings. Every location shares this theme cadence." : "Load the schedule entries to view the 18 planned themes."}</p></div>
+      </aside>
     </div>
   );
 }
