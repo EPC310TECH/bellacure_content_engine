@@ -31,7 +31,16 @@ Theme affects the surrounding edit, lighting, or background only. It must not ch
 
 The application is designed for one salon business with seven locations initially, but the tenant model should support additional salon businesses. Each location has its own subscription. The seven locations initially publish through one shared TikTok account. Stripe Connect is not needed when subscription payments go to the service operator; consider Connect only if salons later need to receive payouts through the product.
 
-The hosting provider and worker queue are still undecided. Keep Stripe secret credentials and webhook signing secrets, Supabase server credentials, and AI provider keys in the deployment's secrets manager. Configure account credentials per environment; never commit them or expose server credentials to the browser.
+For the MVP, use managed Next.js hosting with Supabase and a managed durable job queue. Keep the queue and AI integrations behind adapters so hosting and provider choices can be finalized during the pilot. Keep Stripe secret credentials and webhook signing secrets, Supabase server credentials, and AI provider keys in the deployment's secrets manager. Configure account credentials per environment; never commit them or expose server credentials to the browser.
+
+## MVP decisions
+
+- **Publishing:** Start with human-approved video download/export. Add automated TikTok publishing only after the app's API access and review are approved.
+- **Billing:** Use one flat monthly subscription per location with explicit usage limits. Final price and quota values must be set before paid launch.
+- **Media retention:** While a subscription is active, retain media until the salon requests deletion. On cancellation, stop paid features at the end of the paid period, keep existing media read-only for 30 days, then delete it unless the subscription is renewed. A 7-day payment-failure grace period retains paid features; afterward, pause new uploads and generation but keep existing media viewable.
+- **Creative production:** Start with deterministic photo edits (controlled zooms, cuts, and transitions). Pilot image-to-video separately against real salon photos before enabling it in production.
+- **Permissions:** Technicians can upload and track their own media. Designated salon leadership alone can review and approve videos, connect the shared TikTok account, and authorize publishing.
+- **Provider selection:** Keep AI provider integrations swappable; select vendors after a small pilot evaluates photo fidelity, privacy/data terms, reliability, and cost.
 
 ## End-to-end workflow
 
@@ -74,7 +83,7 @@ flowchart TD
 
 ### TikTok publishing
 
-- Connect one shared salon-owned TikTok account using TikTok's current supported OAuth and content-publishing flow. Generate a cryptographically random, single-use OAuth `state` value bound to the authenticated leadership session and intended salon account; validate and consume it on callback before accepting tokens or changing the connected account. Use PKCE where supported. Confirm the app's API access, review/approval requirements, account eligibility, and permitted visibility options before promising automated publication.
+- Start with manual export; automated publishing is a later phase, gated on TikTok API access and app review approval. If enabled, connect one shared salon-owned TikTok account using TikTok's then-current supported OAuth and content-publishing flow. Generate a cryptographically random, single-use OAuth `state` value bound to the authenticated leadership session and intended salon account; validate and consume it on callback before accepting tokens or changing the connected account. Use PKCE where supported. Confirm account eligibility and permitted visibility options before enabling automated publication.
 - Keep access/refresh tokens and signing credentials server-side in a secrets manager or appropriately encrypted credential store. Never expose them to the browser or place them in prompts/logs.
 - Publishing is a separate job created only from an explicit leadership approval for a specific immutable video version and destination account. Re-check the approver's account permission and the location's active subscription before enqueueing.
 - Track provider post IDs, status, response/errors, and published URL. Make submission idempotent where the API permits; if an outcome is ambiguous, reconcile provider status before retrying to avoid duplicate posts.
@@ -174,6 +183,7 @@ Represent the content job as explicit states, for example: `queued`, `preprocess
 - Enforce tenant and location boundaries in Supabase RLS as well as in API authorization. Keep Supabase server credentials and Stripe secret/webhook keys server-side only; expose only Supabase's client-safe project configuration to the browser.
 - Verify Stripe webhook signatures and provider callbacks, persist event IDs for idempotency, rate-limit upload and generation endpoints, and record audit events for approvals, access changes, billing changes, and AI generation.
 - Get appropriate consent before uploading identifiable customer media. Provide deletion workflows for originals and derivatives and confirm each AI provider's retention/training terms before sending salon content.
+- Retain active-subscription media until the salon requests deletion. When a location cancels, allow read-only access through a 30-day post-period-end window, then delete its media unless it renews. Apply the documented 7-day payment-failure grace period before pausing new uploads and generation; preserve read access to existing media.
 - Store API credentials in a secrets manager. Do not put secrets in prompts, browser code, database logs, or source control.
 - Track queue depth, stage latency, provider errors, retry counts, generation spend, and failed content checks. Provide a per-location kill switch for scheduled generation.
 - Apply provider-specific content and data-handling policies before sending any image or video to a third party.
@@ -184,17 +194,13 @@ Represent the content job as explicit states, for example: `queued`, `preprocess
 2. **Media processing:** Add image/video validation, photo blur/lighting/resolution signals, image/video normalization, optional masks and conservative enhancement, derived-asset storage, status reporting, and retry controls.
 3. **Scheduled creative:** Add schedule configuration, curated LA event/holiday data, still-photo-first asset selection, image-to-video and deterministic multi-photo compositions, creative planning, fidelity checks, and independent review.
 4. **Operations dashboards:** Add the technician upload dashboard and leadership cross-location job queue, review workspace, approval audit trail, and publication status.
-5. **Video generation and publishing:** Add one video provider, output validation, generation budgets, human approval, shared TikTok account connection, and publishing with a manual export fallback.
+5. **Video generation and publishing:** Add deterministic photo editing and output validation first; pilot image-to-video with authentic salon photos before enabling it. Keep manual export for launch; add shared TikTok account connection and automated publishing only after API/app approval.
 6. **Production hardening:** Add billing recovery/access policies, monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
 
 ## Decisions required before implementation
 
-- Hosting/cloud and managed database/object-storage/queue vendor.
-- Whether a failed payment triggers a grace period, what features remain available during it, and when canceled access ends.
-- Per-location product tiers, pricing, trial policy, and who is allowed to start or cancel a location subscription.
-- TikTok developer app/API eligibility, review requirements, supported post types and visibility, and the person responsible for connecting the shared account.
-- AI text/review and video-generation providers, including data retention and commercial-use terms.
-- Whether technician uploads may include identifiable customers, and the required consent/retention policy.
-- Schedule cadence and per-location generation budget.
-- Event source versus a curated Los Angeles calendar, and who maintains it.
-- Leadership approval roles, whether publication is immediate or scheduled after approval, and the fallback process if TikTok publishing is unavailable.
+- Final monthly price and included usage limits per location.
+- Specific managed hosting and durable queue vendors, plus final AI/media processing vendors after the pilot's privacy, fidelity, reliability, and cost evaluation.
+- TikTok developer app/API eligibility, review requirements, supported post types and visibility, and who will connect the shared account before automated publishing is enabled.
+- Consent capture requirements for identifiable customer media, provider retention/training terms, and how deletion requests are submitted and verified.
+- Schedule cadence, per-location generation budget, and event source versus a curated Los Angeles calendar and its maintainer.
