@@ -42,6 +42,8 @@ type Asset = {
   status: string;
   created_at: string;
   location_id: string;
+  object_path?: string;
+  mime_type?: string;
   demo?: boolean;
 };
 type ContentJob = {
@@ -51,6 +53,10 @@ type ContentJob = {
   created_at: string;
   location_id: string;
   media_asset_id: string;
+  generated_object_path: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
 };
 
 const locationNames = [
@@ -112,6 +118,7 @@ export default function Home() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [reviewPreviewOpen, setReviewPreviewOpen] = useState(false);
+  const [reviewJob, setReviewJob] = useState<ContentJob | null>(null);
   const isDemo = !configured;
   const currentLocation = locations.find((location) => location.id === locationId);
   const isLeadership = !isDemo && currentLocation?.role === "leadership";
@@ -159,10 +166,10 @@ export default function Home() {
     setLocationId((current) => availableLocations.some((location) => location.id === current) ? current : availableLocations[0]?.id ?? "");
     const { data: assetRows, error: assetsError } = await supabase
       .from("media_assets")
-      .select("id, original_name, status, created_at, location_id")
+      .select("id, original_name, status, created_at, location_id, object_path, mime_type")
       .in("location_id", ids)
       .order("created_at", { ascending: false })
-      .limit(12);
+      .limit(100);
     if (assetsError) {
       setErrorMessage(`Could not load uploaded media: ${assetsError.message}`);
     } else {
@@ -170,7 +177,7 @@ export default function Home() {
     }
     const { data: jobRows, error: jobsError } = await supabase
       .from("content_jobs")
-      .select("id, status, stage, created_at, location_id, media_asset_id")
+      .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, reviewed_by, reviewed_at, review_note")
       .in("location_id", ids)
       .order("created_at", { ascending: false })
       .limit(25);
@@ -261,7 +268,7 @@ export default function Home() {
           size_bytes: file.size,
           ai_consent_confirmed: true,
         })
-        .select("id, original_name, status, created_at, location_id")
+        .select("id, original_name, status, created_at, location_id, object_path, mime_type")
         .single();
       if (insertError) {
         const { error: cleanupError } = await supabase.storage.from("salon-media").remove([objectPath]);
@@ -276,7 +283,7 @@ export default function Home() {
           media_asset_id: insertedAsset.id,
           created_by: userData.user.id,
         })
-        .select("id, status, stage, created_at, location_id, media_asset_id")
+        .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, reviewed_by, reviewed_at, review_note")
         .single();
       if (jobError) {
         setErrorMessage(`Your file was uploaded, but its queue record could not be created: ${jobError.message}. It remains in your media library.`);
@@ -432,7 +439,7 @@ export default function Home() {
               onUpload={() => document.getElementById("media-upload")?.click()}
             />
           )}
-          {section === "jobs" && <Jobs isDemo={isDemo} isLeadership={isLeadership || isDemo} jobs={jobs.filter((job) => job.location_id === locationId)} assets={selectedAssets} onReview={() => setReviewPreviewOpen(true)} />}
+          {section === "jobs" && <Jobs isDemo={isDemo} isLeadership={isLeadership || isDemo} jobs={isLeadership ? jobs : jobs.filter((job) => job.location_id === locationId)} assets={assets} locations={locations} onReview={(job) => job ? setReviewJob(job) : setReviewPreviewOpen(true)} />}
           {section === "calendar" && <CalendarView isDemo={isDemo} />}
           {section === "settings" && <SettingsView isDemo={isDemo} configured={configured} />}
         </div>
@@ -441,6 +448,17 @@ export default function Home() {
 
       <input id="media-upload" className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple onChange={onFileChange} />
       {reviewPreviewOpen && isDemo && <ReviewPreview onClose={() => setReviewPreviewOpen(false)} />}
+      {reviewJob && supabase && <ReviewDialog
+        job={reviewJob}
+        assets={assets}
+        locationName={locations.find((location) => location.id === reviewJob.location_id)?.name ?? "Salon location"}
+        supabase={supabase}
+        onClose={() => setReviewJob(null)}
+        onReviewed={async () => {
+          await loadWorkspace();
+          setReviewJob(null);
+        }}
+      />}
     </main>
   );
 }
@@ -489,13 +507,15 @@ function UploadDropzone({ isDemo, uploading, uploadMessage, errorMessage, consen
 function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob[]; onJobs: () => void; onUploads: () => void }) {
   const ready = props.assets.filter((asset) => asset.status === "ready").length;
   const queueCount = props.isDemo ? 3 : props.jobs.filter((job) => job.status !== "approved" && job.status !== "rejected").length;
+  const reviewCount = props.jobs.filter((job) => job.status === "ready_for_review").length;
+  const approvedCount = props.jobs.filter((job) => job.status === "approved").length;
   return (
     <>
       <div className="stats-grid">
         <StatCard label="In your library" value={props.isDemo ? "24" : String(props.assets.length)} detail="Originals, kept safe" icon={<ImagePlus size={18} />} tone="lavender" />
         <StatCard label="Ready to create" value={props.isDemo ? "18" : String(ready)} detail="Photos with a little magic" icon={<Sparkles size={18} />} tone="peach" />
         <StatCard label={props.isLeadership ? "In the studio queue" : "Being prepared"} value={String(queueCount)} detail="Moving along nicely" icon={<Activity size={18} />} tone="mint" />
-        <StatCard label={props.isLeadership ? "Ready to review" : "Published this month"} value={props.isDemo ? (props.isLeadership ? "2" : "4") : "0"} detail={props.isLeadership ? "Your approval makes it real" : "Little moments, shared"} icon={<BadgeCheck size={18} />} tone="cream" />
+        <StatCard label={props.isLeadership ? "Ready to review" : "Approved for export"} value={props.isDemo ? (props.isLeadership ? "2" : "4") : String(props.isLeadership ? reviewCount : approvedCount)} detail={props.isLeadership ? "Your approval makes it real" : "Ready for manual export"} icon={<BadgeCheck size={18} />} tone="cream" />
       </div>
 
       <div className="overview-grid">
@@ -554,24 +574,57 @@ function Uploads(props: UploadProps) {
   );
 }
 
-function Jobs({ isDemo, isLeadership, jobs, assets, onReview }: { isDemo: boolean; isLeadership: boolean; jobs: ContentJob[]; assets: Asset[]; onReview: () => void }) {
+function Jobs({ isDemo, isLeadership, jobs, assets, locations, onReview }: { isDemo: boolean; isLeadership: boolean; jobs: ContentJob[]; assets: Asset[]; locations: Location[]; onReview: (job?: ContentJob) => void }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const filteredJobs = jobs.filter((job) =>
+    (statusFilter === "all" || job.status === statusFilter)
+    && (locationFilter === "all" || job.location_id === locationFilter)
+  );
+  const inProgress = jobs.filter((job) => job.status === "queued" || job.status === "processing").length;
+  const awaitingReview = jobs.filter((job) => job.status === "ready_for_review").length;
+  const approved = jobs.filter((job) => job.status === "approved").length;
+  const changesRequested = jobs.filter((job) => job.stage === "review_changes_requested").length;
   return (
     <>
       <div className="stats-grid jobs-stats">
-        <StatCard label="In progress" value={isDemo ? "3" : "0"} detail="Being prepared" icon={<Activity size={18} />} tone="lavender" />
-        <StatCard label="Needs your eye" value={isDemo && isLeadership ? "2" : "0"} detail="Waiting for review" icon={<ShieldCheck size={18} />} tone="peach" />
-        <StatCard label="Ready to share" value="0" detail="Approved and waiting" icon={<BadgeCheck size={18} />} tone="mint" />
-        <StatCard label="Published this month" value={isDemo ? "4" : "0"} detail="Sent out with care" icon={<Video size={18} />} tone="cream" />
+        <StatCard label="In progress" value={isDemo ? "3" : String(inProgress)} detail="Queued or processing" icon={<Activity size={18} />} tone="lavender" />
+        <StatCard label="Needs your eye" value={isDemo && isLeadership ? "2" : String(awaitingReview)} detail="Waiting for review" icon={<ShieldCheck size={18} />} tone="peach" />
+        <StatCard label="Approved for export" value={isDemo ? "0" : String(approved)} detail="Ready for manual export" icon={<BadgeCheck size={18} />} tone="mint" />
+        <StatCard label="Changes requested" value={isDemo ? "0" : String(changesRequested)} detail="Returned for another pass" icon={<Activity size={18} />} tone="cream" />
       </div>
       <section className="content-card jobs-card full-jobs-card">
-        <div className="list-heading"><div><span className="card-kicker">{isLeadership ? "ALL LOCATIONS" : "YOUR CONTENT"}</span><h2>{isLeadership ? "Your studio queue" : "Jobs from your uploads"}</h2><p>{isLeadership ? "A gentle overview of every location's work." : "See how your uploads are coming along."}</p></div><button className="filter-button">All stages <ChevronDown size={14} /></button></div>
-        {isDemo ? <JobRows onClick={onReview} showReview={isLeadership} /> : jobs.length ? <div className="asset-table">
-          {jobs.map((job) => {
+        <div className="list-heading"><div><span className="card-kicker">{isLeadership ? "ALL LOCATIONS" : "YOUR CONTENT"}</span><h2>{isLeadership ? "Your studio queue" : "Jobs from your uploads"}</h2><p>{isLeadership ? "A gentle overview of every location's work." : "See how your uploads are coming along."}</p></div>
+          <div className="queue-filters">
+            {isLeadership && <label className="visually-hidden" htmlFor="job-location-filter">Filter jobs by location</label>}
+            {isLeadership && <select id="job-location-filter" className="filter-button" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">All locations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select>}
+            <label className="visually-hidden" htmlFor="job-status-filter">Filter jobs by status</label>
+            <select id="job-status-filter" className="filter-button" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">All stages</option>
+              <option value="queued">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="ready_for_review">Ready for review</option>
+              <option value="approved">Approved for export</option>
+              <option value="rejected">Rejected</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+        {isDemo ? <JobRows onClick={() => onReview()} showReview={isLeadership} /> : filteredJobs.length ? <div className="asset-table">
+          {filteredJobs.map((job) => {
             const asset = assets.find((item) => item.id === job.media_asset_id);
-            return <div className="asset-row" key={job.id}><div className="asset-thumb"><FileKind name={asset?.original_name ?? "Queued media"} /></div><div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")}</span></div><StatusPill status={job.status} /></div>;
+            const locationName = locations.find((location) => location.id === job.location_id)?.name ?? "Salon location";
+            const canReview = isLeadership && job.status === "ready_for_review" && Boolean(job.generated_object_path);
+            return <div className="asset-row" key={job.id}>
+              <div className="asset-thumb"><FileKind name={asset?.original_name ?? "Queued media"} /></div>
+              <div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{locationName} · {formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")}</span></div>
+              <StatusPill status={job.status} />
+              {canReview && <button className="button-secondary review-action" onClick={() => onReview(job)}><ShieldCheck size={14} /> Review video</button>}
+              {job.status === "ready_for_review" && !job.generated_object_path && <span className="review-pending-note">Video file unavailable</span>}
+            </div>;
           })}
-        </div> : <EmptyState icon={<Film size={20} />} title="No video jobs yet" description="Your uploads will appear here when they enter the content queue." />}
-        <div className="worker-note"><Clock3 size={15} /><span>The MVP dashboard is ready. Background composition and video workers will be connected next.</span></div>
+        </div> : <EmptyState icon={<Film size={20} />} title={jobs.length ? "No jobs match these filters" : "No video jobs yet"} description={jobs.length ? "Try a different location or stage." : "Your uploads will appear here when they enter the content queue."} />}
+        {isDemo ? <div className="worker-note"><Clock3 size={15} /><span>Sample jobs only. Connect Supabase for the live queue; generated videos remain unavailable until a worker is connected.</span></div> : <div className="worker-note"><Clock3 size={15} /><span>Queue status is live. Generation and manual export workers are not connected yet.</span></div>}
       </section>
     </>
   );
@@ -621,6 +674,132 @@ function ReviewPreview({ onClose }: { onClose: () => void }) {
         <div className="review-details"><div className="review-detail-row"><span>LOCATION</span><strong>Beverly Hills</strong></div><div className="review-detail-row"><span>THEME</span><strong>Autumn glow · warm cherry</strong></div><div className="review-detail-row"><span>CREATIVE TREATMENT</span><strong>Slow macro push-in · soft ambient light</strong></div><div className="review-guardrail"><ShieldCheck size={16} /><span>Original nail color and design stay the source of truth. No generated text or speech.</span></div></div>
       </div>
       <footer className="review-dialog-footer"><span>{approved ? <><Check size={15} /> Preview approval noted locally only</> : "Leadership approval required before export."}</span><div><button className="button-secondary" onClick={onClose}>{approved ? "Close" : "Request changes"}</button><button className="button-primary" onClick={() => setApproved(true)} disabled={approved}><BadgeCheck size={15} />{approved ? "Preview approved" : "Approve preview"}</button></div></footer>
+    </section>
+  </div>;
+}
+
+type ReviewDecision = "approved" | "rejected" | "changes_requested";
+type ReviewHistoryEntry = {
+  id: string;
+  decision: ReviewDecision;
+  note: string | null;
+  created_at: string;
+};
+
+function ReviewDialog({
+  job,
+  assets,
+  locationName,
+  supabase,
+  onClose,
+  onReviewed,
+}: {
+  job: ContentJob;
+  assets: Asset[];
+  locationName: string;
+  supabase: ReturnType<typeof createClient>;
+  onClose: () => void;
+  onReviewed: () => Promise<void>;
+}) {
+  const sourceAsset = assets.find((asset) => asset.id === job.media_asset_id);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [reviewHistory, setReviewHistory] = useState<ReviewHistoryEntry[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadReviewMedia() {
+      if (!job.generated_object_path) {
+        setError("This job does not have a generated video available.");
+        setLoading(false);
+        return;
+      }
+      const [videoResult, sourceResult, historyResult] = await Promise.all([
+        supabase.storage.from("salon-media").createSignedUrl(job.generated_object_path, 900),
+        sourceAsset?.object_path
+          ? supabase.storage.from("salon-media").createSignedUrl(sourceAsset.object_path, 900)
+          : Promise.resolve({ data: null, error: null }),
+        supabase.from("content_job_reviews")
+          .select("id, decision, note, created_at")
+          .eq("content_job_id", job.id)
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ]);
+      if (cancelled) return;
+      if (videoResult.error) {
+        setError(`Could not load the generated video: ${videoResult.error.message}`);
+      } else if (sourceResult.error) {
+        setError(`Could not load the source media: ${sourceResult.error.message}`);
+      } else if (historyResult.error) {
+        setError(`Could not load review history: ${historyResult.error.message}`);
+      } else {
+        setVideoUrl(videoResult.data.signedUrl);
+        setSourceUrl(sourceResult.data?.signedUrl ?? "");
+        setReviewHistory(historyResult.data ?? []);
+      }
+      setLoading(false);
+    }
+    void loadReviewMedia();
+    return () => { cancelled = true; };
+  }, [job.generated_object_path, job.id, sourceAsset?.object_path, supabase]);
+
+  async function submitDecision(decision: ReviewDecision) {
+    setError("");
+    if (decision !== "approved" && !note.trim()) {
+      setError("Add a reason when requesting changes or rejecting this video.");
+      return;
+    }
+    setSubmitting(true);
+    const { error: reviewError } = await supabase.rpc("review_content_job", {
+      p_job_id: job.id,
+      p_decision: decision,
+      p_note: note.trim() || null,
+    });
+    setSubmitting(false);
+    if (reviewError) {
+      setError(`Could not save your review: ${reviewError.message}`);
+      return;
+    }
+    await onReviewed();
+  }
+
+  return <div className="review-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }}>
+    <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="live-review-title">
+      <header className="review-dialog-header"><div><span className="card-kicker">LEADERSHIP REVIEW</span><h2 id="live-review-title">{sourceAsset?.original_name ?? "Generated salon video"}</h2></div><button className="icon-button" aria-label="Close review" onClick={onClose} disabled={submitting}><X size={19} /></button></header>
+      <div className="review-preview-banner"><ShieldCheck size={14} /> Review the generated video before approving it for manual export. Approval does not publish to TikTok.</div>
+      <div className="review-body">
+        <div className="live-review-media">
+          {loading ? <div className="review-media-placeholder"><LoaderCircle className="spin" size={22} />Loading private review media…</div>
+            : videoUrl ? <video className="review-video" src={videoUrl} controls playsInline preload="metadata" aria-label="Generated salon video for review" />
+              : <div className="review-media-placeholder"><Film size={21} />Generated video unavailable</div>}
+          <div className="review-source">
+            <span className="card-kicker">SOURCE MEDIA · {sourceAsset?.original_name ?? "Original upload"}</span>
+            {sourceUrl && sourceAsset?.mime_type?.startsWith("video/")
+              ? <video className="review-source-video" src={sourceUrl} controls playsInline preload="metadata" aria-label="Original uploaded video" />
+              : <div className="review-source-image" role="img" aria-label={`Original source: ${sourceAsset?.original_name ?? "uploaded media"}`} style={sourceUrl ? { backgroundImage: `url(${JSON.stringify(sourceUrl)})` } : undefined}>{!sourceUrl && <ImagePlus size={20} />}</div>}
+          </div>
+        </div>
+        <div className="review-details">
+          <div className="review-detail-row"><span>LOCATION</span><strong>{locationName}</strong></div>
+          <div className="review-detail-row"><span>JOB STATUS</span><strong>{job.status.replaceAll("_", " ")}</strong></div>
+          <div className="review-detail-row"><span>CREATED</span><strong>{formatDate(job.created_at)}</strong></div>
+          {job.review_note && <div className="review-detail-row"><span>PREVIOUS REVIEW NOTE</span><strong>{job.review_note}</strong></div>}
+          <label className="review-note-label" htmlFor="review-note">Review note <span>Required for changes or rejection</span></label>
+          <textarea id="review-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Share a clear, helpful note for the next pass." />
+          <div className="review-guardrail"><ShieldCheck size={16} /><span>Only designated location leadership can record this decision. Every review is kept in the audit history.</span></div>
+          {reviewHistory.length > 0 && <div className="review-history"><span className="card-kicker">RECENT REVIEW HISTORY</span><ol>{reviewHistory.map((entry) => <li key={entry.id}><strong>{entry.decision.replaceAll("_", " ")}</strong><time>{formatDate(entry.created_at)}</time>{entry.note && <p>{entry.note}</p>}</li>)}</ol></div>}
+        </div>
+      </div>
+      {(error || loading) && <div className={`review-action-message ${error ? "review-error" : ""}`} role={error ? "alert" : "status"}>{error || "Loading signed, private media…"}</div>}
+      <footer className="review-dialog-footer"><span>Approved videos are prepared for manual export only.</span><div>
+        <button className="button-secondary" onClick={() => void submitDecision("changes_requested")} disabled={submitting || loading || !videoUrl}><WandSparkles size={14} /> Request changes</button>
+        <button className="button-secondary" onClick={() => void submitDecision("rejected")} disabled={submitting || loading || !videoUrl}><X size={14} /> Reject</button>
+        <button className="button-primary" onClick={() => void submitDecision("approved")} disabled={submitting || loading || !videoUrl}>{submitting ? <LoaderCircle className="spin" size={15} /> : <BadgeCheck size={15} />}{submitting ? "Saving…" : "Approve for export"}</button>
+      </div></footer>
     </section>
   </div>;
 }

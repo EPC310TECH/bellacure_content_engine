@@ -1,6 +1,6 @@
 begin;
 
-select plan(16);
+select plan(26);
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.salon_accounts'::regclass),
@@ -65,6 +65,46 @@ select ok(
 select ok(
   not (select public from storage.buckets where id = 'salon-media'),
   'salon media bucket is private'
+);
+select ok(
+  (select relrowsecurity from pg_class where oid = 'public.content_job_reviews'::regclass),
+  'content_job_reviews has row-level security enabled'
+);
+select ok(
+  not has_table_privilege('anon', 'public.content_job_reviews', 'SELECT'),
+  'anonymous users cannot read review history'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.content_job_reviews', 'SELECT'),
+  'authenticated users can read review history subject to RLS'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.content_job_reviews', 'INSERT'),
+  'clients cannot write review history directly'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.content_job_reviews', 'UPDATE'),
+  'clients cannot change review history'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.content_job_reviews', 'DELETE'),
+  'clients cannot delete review history'
+);
+select ok(
+  has_function_privilege('authenticated', 'public.review_content_job(uuid,text,text)', 'EXECUTE'),
+  'authenticated users can submit review decisions through the guarded function'
+);
+select ok(
+  not has_function_privilege('anon', 'public.review_content_job(uuid,text,text)', 'EXECUTE'),
+  'anonymous users cannot submit review decisions'
+);
+select ok(
+  (select prosecdef from pg_proc where oid = 'public.review_content_job(uuid,text,text)'::regprocedure),
+  'review function runs with its owner privileges for an atomic audit write'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.content_jobs', 'UPDATE'),
+  'clients cannot change job state outside the guarded review function'
 );
 
 select * from finish();

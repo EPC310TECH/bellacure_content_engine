@@ -54,6 +54,10 @@ export type Database = {
           created_by: string;
           status: "queued" | "processing" | "ready_for_review" | "approved" | "rejected" | "failed";
           stage: string;
+          generated_object_path: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          review_note: string | null;
           created_at: string;
         },
         {
@@ -63,12 +67,41 @@ export type Database = {
           created_by: string;
           status?: "queued" | "processing" | "ready_for_review" | "approved" | "rejected" | "failed";
           stage?: string;
+          generated_object_path?: string | null;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_note?: string | null;
+          created_at?: string;
+        }
+      >;
+      content_job_reviews: Table<
+        {
+          id: string;
+          content_job_id: string;
+          generated_object_path: string;
+          reviewer_id: string;
+          decision: "approved" | "rejected" | "changes_requested";
+          note: string | null;
+          created_at: string;
+        },
+        {
+          id?: string;
+          content_job_id: string;
+          generated_object_path: string;
+          reviewer_id: string;
+          decision: "approved" | "rejected" | "changes_requested";
+          note?: string | null;
           created_at?: string;
         }
       >;
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      review_content_job: {
+        Args: { p_job_id: string; p_decision: "approved" | "rejected" | "changes_requested"; p_note?: string | null };
+        Returns: Database["public"]["Tables"]["content_jobs"]["Row"];
+      };
+    };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
   };
