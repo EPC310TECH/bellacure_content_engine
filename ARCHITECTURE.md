@@ -4,18 +4,19 @@
 
 Create a multi-location workflow where salon technicians upload source photos or MP4 clips, and a scheduled AI pipeline turns approved media into short, salon-themed TikTok videos. Content is organized by seven salon locations. A schedule selects a seasonal, holiday, or Los Angeles event theme; AI drafts a script, storyboard, and generation prompt; a separate reviewer checks the creative brief; and a video model generates the final clip.
 
-The initial product should create and queue videos for human review. It should not publish to TikTok automatically.
+The product has two role-focused dashboards: a technician dashboard for uploading and tracking media, and a leadership dashboard for monitoring jobs, reviewing generated videos, and approving publication. Videos are never published without an authorized human approval.
 
 ## Recommended system shape
 
-- **Web app:** Next.js application for technician uploads, location-scoped media library, schedule configuration, and a generated-content review queue.
+- **Web app:** Next.js application with a technician upload dashboard, location-scoped media library, schedule configuration, and a leadership dashboard for job monitoring, review, approval, and TikTok publishing.
 - **Application API:** Authenticated server endpoints for uploads, job creation, schedule management, approvals, and provider callbacks.
 - **Application backend:** Supabase Auth for sign-in, PostgreSQL for application data, and private Supabase Storage buckets for originals, normalized derivatives, and generated videos. Store object keys and metadata in PostgreSQL, not media bytes.
 - **Billing:** The service operator's Stripe account sells subscriptions to salon locations. Stripe Checkout handles sign-up and Stripe's customer portal handles payment-method and subscription self-service.
+- **Social publishing:** One shared, salon-owned TikTok account is connected through TikTok's supported publishing integration. Only approved videos can enter the publishing queue.
 - **Background processing:** Durable queue and workers for media preprocessing, creative generation, and video generation. Use retries with backoff, idempotent jobs, and dead-letter handling.
 - **Provider adapters:** Keep image/video processing, language models, event feeds, and video-generation APIs behind interfaces so vendors can be changed without changing the workflow.
 
-The application is designed for one salon business with seven locations initially, but the tenant model should support additional salon businesses. Each location has its own subscription. Stripe Connect is not needed when subscription payments go to the service operator; consider Connect only if salons later need to receive payouts through the product.
+The application is designed for one salon business with seven locations initially, but the tenant model should support additional salon businesses. Each location has its own subscription. The seven locations initially publish through one shared TikTok account. Stripe Connect is not needed when subscription payments go to the service operator; consider Connect only if salons later need to receive payouts through the product.
 
 The hosting provider and worker queue are still undecided. Keep Stripe secret credentials and webhook signing secrets, Supabase server credentials, and AI provider keys in the deployment's secrets manager. Configure account credentials per environment; never commit them or expose server credentials to the browser.
 
@@ -35,9 +36,36 @@ flowchart TD
     K -->|Pass| L[Video generation worker]
     K -->|Needs changes| J
     L --> M[Validate generated video and save it]
-    M --> N[Human review and approval queue]
-    N --> O[Download or export for manual TikTok publishing]
+    M --> N[Leadership dashboard review queue]
+    N -->|Reject or request changes| J
+    N -->|Approve| O[Publish through shared TikTok account]
+    O --> P[Show TikTok publishing status and link]
 ```
+
+## Role-based dashboards
+
+### Technician upload dashboard
+
+- Sign in and select an authorized salon location.
+- Upload supported images and MP4 videos with clear file, duration, and size requirements; show upload progress and validation errors.
+- Browse that location's originals and processed derivatives, with processing state, retryable failures, and whether each asset is eligible for AI use.
+- Track jobs using the technician's assets through preprocessing and generation without exposing other locations' media, billing data, or leadership-only approval controls.
+
+### Leadership operations and review dashboard
+
+- Provide authorized leadership with a cross-location overview of active subscriptions, queued/running/failed jobs, jobs awaiting review, approved posts awaiting publication, and recently published videos. Scope the overview to the leader's permitted salon account.
+- Offer queue filters for location, schedule, job state, theme, date, and assignee; show stage, progress, timestamps, attempts, and actionable failure details. Support safe retry or cancellation where appropriate.
+- In the review workspace, show the finished video alongside source assets, location, selected theme/event context, storyboard and prompt, AI review result, and automated no-text/no-speech validation.
+- Allow leadership to approve, reject with a reason, or request a bounded regeneration. Require explicit confirmation before publishing; record approver, timestamp, destination, and approved artifact version.
+- Show publication progress and the TikTok post URL when available. Clearly distinguish generated, awaiting review, approved, publishing, published, and failed states.
+
+### TikTok publishing
+
+- Connect one shared salon-owned TikTok account using TikTok's current supported OAuth and content-publishing flow. Confirm the app's API access, review/approval requirements, account eligibility, and permitted visibility options before promising automated publication.
+- Keep access/refresh tokens and signing credentials server-side in a secrets manager or appropriately encrypted credential store. Never expose them to the browser or place them in prompts/logs.
+- Publishing is a separate job created only from an explicit leadership approval for a specific immutable video version and destination account. Re-check the approver's account permission and the location's active subscription before enqueueing.
+- Track provider post IDs, status, response/errors, and published URL. Make submission idempotent where the API permits; if an outcome is ambiguous, reconcile provider status before retrying to avoid duplicate posts.
+- Do not silently publish a replacement after regeneration: every changed video requires a new review and approval. Preserve a manual download/export path if API access is unavailable or publishing fails.
 
 ## Upload and preprocessing
 
@@ -87,6 +115,8 @@ Prompts and provider requests must explicitly require: nail-salon imagery and su
 | `content_jobs` | Schedule run, location, selected assets, theme, state, attempt count, timestamps |
 | `creative_artifacts` | Brief, script, storyboard, prompt, reviewer output, model/provider versions |
 | `generated_videos` | Job, object key, provider job ID, validation results, review decision |
+| `social_accounts` | Salon account, provider, connected account identifier, connection state, secret reference; never store publish tokens in client-readable rows |
+| `publication_jobs` | Approved video version, destination account, approver, state, provider post ID/URL, attempts, timestamps, error details |
 | `audit_events` | Actor, action, entity, timestamp, and relevant change metadata |
 
 Use foreign keys and indexes for location-scoped queries and job polling. Keep large media out of database rows. Apply a documented retention policy to originals, derivatives, prompts, and rejected generations.
@@ -113,13 +143,16 @@ Use foreign keys and indexes for location-scoped queries and job polling. Keep l
 - `POST /api/content-jobs` — request an authorized one-off run or enqueue a scheduled run.
 - `GET /api/content-jobs/{id}` — return state and review artifacts.
 - `POST /api/generated-videos/{id}/review` — approve, reject, or request regeneration.
+- `POST /api/social/connect` — begin authorized connection of the shared salon TikTok account.
+- `POST /api/generated-videos/{id}/publish` — create a publication job only after verifying explicit leadership approval and destination authorization.
+- `GET /api/publication-jobs/{id}` — return publication state and provider URL/error details.
 - `POST /api/providers/{provider}/callback` — authenticate and idempotently process provider callbacks.
 
 Worker-only operations should use service credentials and must not be exposed as unrestricted client endpoints.
 
 ## Job states and reliability
 
-Represent the job as explicit states, for example: `queued`, `preprocessing`, `ready_for_brief`, `drafting`, `reviewing`, `generating`, `validating`, `awaiting_human_review`, `approved`, `rejected`, and `failed`. Persist stage transitions and error details. Retry transient provider/network failures with capped exponential backoff; do not retry invalid media or policy failures blindly. Use an idempotency key per scheduled run and per provider submission. Configure a maximum generation/revision budget per location and alert on exhausted jobs.
+Represent the content job as explicit states, for example: `queued`, `preprocessing`, `ready_for_brief`, `drafting`, `reviewing`, `generating`, `validating`, `awaiting_human_review`, `approved`, `rejected`, and `failed`. Track publication as its own state machine, for example: `not_requested`, `queued`, `publishing`, `published`, and `failed`, linked to the exact approved video version. Persist stage transitions and error details. Retry transient provider/network failures with capped exponential backoff; do not retry invalid media or policy failures blindly. Use an idempotency key per scheduled run and per provider submission. Configure a maximum generation/revision budget per location and alert on exhausted jobs.
 
 ## Security, privacy, and operational controls
 
@@ -136,16 +169,18 @@ Represent the job as explicit states, for example: `queued`, `preprocessing`, `r
 1. **Accounts and billing foundation:** Configure the Supabase project, salon-account/location tenancy, Auth, RLS, private storage, Stripe products/prices, location subscription checkout, webhook synchronization, and billing tests.
 2. **Media processing:** Add validation, image/video normalization, derived-asset storage, status reporting, and retry controls.
 3. **Scheduled creative:** Add schedule configuration, curated LA event/holiday data, asset selection, script/storyboard drafting, and independent review.
-4. **Video generation and review:** Add one video provider, output validation, generation budgets, and human approval/export.
-5. **Production hardening:** Add billing recovery/access policies, monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
+4. **Operations dashboards:** Add the technician upload dashboard and leadership cross-location job queue, review workspace, approval audit trail, and publication status.
+5. **Video generation and publishing:** Add one video provider, output validation, generation budgets, human approval, shared TikTok account connection, and publishing with a manual export fallback.
+6. **Production hardening:** Add billing recovery/access policies, monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
 
 ## Decisions required before implementation
 
 - Hosting/cloud and managed database/object-storage/queue vendor.
 - Whether a failed payment triggers a grace period, what features remain available during it, and when canceled access ends.
 - Per-location product tiers, pricing, trial policy, and who is allowed to start or cancel a location subscription.
+- TikTok developer app/API eligibility, review requirements, supported post types and visibility, and the person responsible for connecting the shared account.
 - AI text/review and video-generation providers, including data retention and commercial-use terms.
 - Whether technician uploads may include identifiable customers, and the required consent/retention policy.
 - Schedule cadence and per-location generation budget.
 - Event source versus a curated Los Angeles calendar, and who maintains it.
-- Approval roles and whether approved videos are exported manually or eventually published through a supported social API.
+- Leadership approval roles, whether publication is immediate or scheduled after approval, and the fallback process if TikTok publishing is unavailable.
