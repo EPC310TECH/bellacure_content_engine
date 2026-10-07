@@ -2,9 +2,22 @@
 
 ## Goal
 
-Create a multi-location workflow where salon technicians upload source photos or MP4 clips, and a scheduled AI pipeline turns approved media into short, salon-themed TikTok videos. Content is organized by seven salon locations. A schedule selects a seasonal, holiday, or Los Angeles event theme; AI drafts a script, storyboard, and generation prompt; a separate reviewer checks the creative brief; and a video model generates the final clip.
+Create a multi-location workflow where salon technicians upload finished-nail photos (preferred) or MP4 clips, and a scheduled pipeline turns this authentic source media into short, salon-themed TikTok videos. Content is organized by seven salon locations. A schedule selects a seasonal, holiday, or Los Angeles event theme; AI plans and reviews the creative treatment; image-to-video adds restrained motion to a still, or a deterministic editor composes multiple photos into a clip.
 
 The product has two role-focused dashboards: a technician dashboard for uploading and tracking media, and a leadership dashboard for monitoring jobs, reviewing generated videos, and approving publication. Videos are never published without an authorized human approval.
+
+## Authentic-photo-first creative strategy
+
+Technician-captured still photos of finished nail work are the default source and visual ground truth. The pipeline uses AI to add restrained camera movement, lighting, and optional background context, not to invent or redesign the manicure. Original pixels are preserved as the source of truth; AI-generated motion can still distort fine nail details, so generated clips are candidates for review, not proof that every frame faithfully preserves the photo.
+
+Prefer the least transformative production path that fits the available media:
+
+1. **One strong still:** create a short image-to-video (I2V) clip with a locked subject and narrowly constrained camera trajectory and ambient lighting.
+2. **Several views or before/after stills:** assemble an edit programmatically with FFmpeg or a composition tool such as Remotion. Use controlled crops, pans, cuts, split-screen, and transitions rather than generating new nail imagery. Beat synchronization is optional and must not introduce speech or on-screen text.
+3. **Optional background treatment:** create a subject mask and composite the authentic hand/nails over a schedule-appropriate background. Keep this opt-in and reviewable; mask errors around nails, fingers, jewelry, and tools must be detected or sent for manual correction.
+4. **Optional image enhancement:** correct orientation, resize, and apply conservative denoising or upscaling only when needed. Keep the original unchanged and compare the result so enhancement cannot silently recolor polish, redraw nail art, or invent detail.
+
+Theme affects the surrounding edit, lighting, or background only. It must not change nail color, shape, length, finish, art, or the hand itself. If the selected video model cannot reliably preserve the subject, use the programmatic still-photo composition path instead.
 
 ## Recommended system shape
 
@@ -24,14 +37,14 @@ The hosting provider and worker queue are still undecided. Keep Stripe secret cr
 
 ```mermaid
 flowchart TD
-    A[Technician selects location and uploads image or MP4] --> B[Validate file and create media record]
+    A[Technician selects location and uploads still photos or MP4] --> B[Validate file and create media record]
     B --> C[Private object storage: original]
-    C --> D[Preprocessing worker]
-    D --> E[Store normalized image or video derivatives]
+    C --> D[Preprocessing and quality checks]
+    D --> E[Store normalized derivatives and optional subject masks]
     E --> F[Media ready in location library]
     G[Schedule tick in Los Angeles time] --> H[Choose eligible media and theme]
     H --> I[Gather upcoming holidays, seasons, and LA events]
-    I --> J[Generate script, storyboard, and video prompt]
+    I --> J[Choose authentic-photo I2V or deterministic photo edit]
     J --> K[Independent AI review and policy checks]
     K -->|Pass| L[Video generation worker]
     K -->|Needs changes| J
@@ -47,8 +60,8 @@ flowchart TD
 ### Technician upload dashboard
 
 - Sign in and select an authorized salon location.
-- Upload supported images and MP4 videos with clear file, duration, and size requirements; show upload progress and validation errors.
-- Browse that location's originals and processed derivatives, with processing state, retryable failures, and whether each asset is eligible for AI use.
+- Upload still photos as the preferred input, plus supported MP4 videos, with clear file, duration, and size requirements; show upload progress and validation errors.
+- Browse that location's originals and processed derivatives, including quality warnings, optional masks/enhancements, processing state, retryable failures, and whether each asset is eligible for AI use.
 - Track jobs using the technician's assets through preprocessing and generation without exposing other locations' media, billing data, or leadership-only approval controls.
 
 ### Leadership operations and review dashboard
@@ -69,13 +82,14 @@ flowchart TD
 
 ## Upload and preprocessing
 
-1. The technician signs in, selects one of the seven configured locations, and uploads an image or MP4. Location membership is checked on the server; a client-supplied location ID is never authorization.
-2. The API validates file type using content inspection, size, duration, and image/video dimensions. It creates a media row with an upload state and returns a short-lived, restricted upload URL.
+1. The technician signs in, selects one of the seven configured locations, and uploads one or more still photos (preferred) or MP4 clips. Location membership is checked on the server; a client-supplied location ID is never authorization.
+2. The API validates file type using content inspection, size, duration, and image/video dimensions. For photos, check resolution, exposure/lighting, and blur (for example, Laplacian variance); store measured quality signals and configurable, empirically calibrated thresholds. Flag borderline images with actionable guidance (for example, retake in focus or improve lighting) instead of silently discarding them. Create a media row with an upload state and return a short-lived, restricted upload URL.
 3. The original is stored privately and retained unchanged. A completed upload enqueues a preprocessing job.
-4. Preprocessing creates normalized derivatives: orientation-corrected and web-sized images, plus MP4 clips normalized to supported codecs, dimensions, frame rate, and duration. Optional background removal or visual filters are non-destructive derived variants, not replacements for the original.
-5. The worker records derivative keys, processing results, and errors, and marks the media `ready` or `failed`. A technician can see failures and retry eligible jobs.
+4. Preprocessing creates normalized derivatives: orientation-corrected and web-sized images, plus MP4 clips normalized to supported codecs, dimensions, frame rate, and duration. For photos, optionally create a subject mask (such as with a segmentation model) with transparency and, only if a downstream compositor needs it, depth data. Retain mask confidence and allow inspection/correction; segmentation must not erase or alter the hand or nails.
+5. Optional background removal/replacement and light-touch enhancement create separate, versioned derivatives, never replacements for originals. Check enhancement for material color/detail shifts before making it eligible for generation.
+6. The worker records derivative keys, quality signals, processing versions, results, and errors, and marks media `ready`, `needs_attention`, or `failed`. A technician can inspect warnings and retry eligible jobs.
 
-Background removal and filters should be optional processing steps controlled by configuration. They can alter nail color or detail, so retain the original and make each effect inspectable before it is used in a generated video.
+Do not bake decorative filters into the only available image. Any background, lighting, or filter treatment must remain isolated from the nail/hand subject where feasible and inspectable before use. Disqualify media only for a clear technical or consent reason; low-quality but usable media should be flagged for a person to decide.
 
 ## Schedule, themes, and Los Angeles context
 
@@ -84,20 +98,20 @@ Background removal and filters should be optional processing steps controlled by
 - A theme selector considers the date, season, configured holidays, and curated upcoming Los Angeles-area events. Use an event feed only when its licensing, reliability, and update cadence are acceptable; otherwise maintain a curated event table with start/end dates, location, category, source, and last-verified time.
 - Treat event data as creative context, not as guaranteed truth. Exclude stale or unverified events, and do not imply salon sponsorship or affiliation with an event.
 - Each schedule run records why it selected the theme and which event/calendar records informed the brief.
-- Select only ready media that the location has made available for AI use. Avoid repeatedly using the same asset by recording its use history and applying a configurable cooldown.
+- Select only ready media that the location has made available for AI use. Prefer technician still photos of completed work, allow multiple photos from one set to form a single composition, and avoid repeatedly using the same asset by recording use history and applying a configurable cooldown.
 
 ## AI creation and review
 
 Use separate, versioned workflow stages so each output can be inspected and retried:
 
-1. **Brief:** Inputs include the location's brand settings, eligible media, target duration/aspect ratio, selected theme, and relevant event context.
-2. **Creative draft:** Generate a short-form script, shot-by-shot storyboard, and a structured video-generation prompt. The script is planning metadata only; it is not rendered as on-screen text or voiceover.
-3. **Independent review:** A separate model reviews the storyboard and prompt against brand fit, salon relevance, source-media consistency, event accuracy, safety, and format constraints. It returns structured `pass` or `revise` results with reasons. Bound revision attempts; after the limit, stop for human review rather than looping indefinitely.
-4. **Video generation:** Submit only a passing, versioned prompt and selected assets. Persist the provider job ID and poll or consume callbacks through an idempotent handler.
-5. **Output checks:** Verify the result is a readable video, meets duration/aspect-ratio requirements, and has no detectable speech or unwanted text. Because model instructions are not guarantees, send uncertain or failed checks to a person and do not mark them approved automatically.
-6. **Human review:** Present the generated video, source assets, theme, script/storyboard, reviewer decision, and processing history. An authorized person can approve, reject, or request a regeneration.
+1. **Brief:** Inputs include location brand settings, eligible technician photos, target duration/aspect ratio, selected theme, and relevant event context.
+2. **Creative plan:** Describe the photo-led sequence: still-photo order, crop/framing, camera movement, speed/easing, cuts, and any optional background treatment. A script may be stored as planning metadata, but it is not rendered as on-screen text or voiceover.
+3. **Generation path:** For one still, use image-to-video with narrowly scoped instructions for camera trajectory and ambient lighting; explicitly lock the hand and nails and prohibit changes to hand identity/pose, nail geometry, polish color, finish, or artwork. Do not ask a text-to-video model to invent the manicure. For multiple stills, prefer a deterministic composition with measured pans/zooms and cuts; use the AI model only when the chosen treatment warrants its fidelity risk.
+4. **Independent review:** A separate model reviews the plan and prompt against brand fit, source-photo fidelity, theme appropriateness, safety, and format constraints. It returns structured `pass` or `revise` results with reasons. Bound revision attempts; after the limit, stop for human review rather than looping indefinitely.
+5. **Output checks:** Verify the video is readable and meets duration/aspect-ratio requirements, and check for unwanted text or speech. For I2V, sample aligned frames/crops and compare them with the source for nail color, shape, and art consistency using suitable visual checks (for example, color comparison and image similarity/feature matching). Global SSIM alone is not a reliable fidelity guarantee when the camera moves or lighting changes; calibrate thresholds with real salon photos and route uncertain, changed, or low-confidence results to human review. Automated checks cannot guarantee that no frame was altered.
+6. **Human review:** Present the finished video alongside original and processed stills, quality warnings, any masks/backgrounds, selected theme, storyboard, AI review, fidelity-check results, and processing history. Leadership can approve, reject, or request a bounded regeneration. Any new render requires a fresh review and approval.
 
-Prompts and provider requests must explicitly require: nail-salon imagery and subject matter; no captions, titles, logos, watermarks, or other generated text; no dialogue, narration, singing, or audible speech; and no people speaking. Prefer instrumental or no audio where supported. Preserve provider moderation results and make prompt/model versions auditable.
+All paths must prohibit captions, titles, logos, watermarks, and other generated text, as well as dialogue, narration, singing, audible speech, and people speaking. Prefer no audio for still-photo compositions; if audio is used, allow only approved instrumental audio. Preserve provider moderation results and make prompt/model versions auditable.
 
 ## Core data model
 
@@ -109,7 +123,7 @@ Prompts and provider requests must explicitly require: nail-salon imagery and su
 | `billing_subscriptions` | Location, Stripe customer/subscription/price IDs, internal status, current period end, cancellation state, last synced time |
 | `stripe_webhook_events` | Stripe event ID, type, received/processed timestamps, processing status, and safe error details for idempotent handling |
 | `media_assets` | Location, uploader, original object key, media type, metadata, consent/AI-use state, lifecycle status |
-| `media_derivatives` | Parent asset, derivative type, object key, processing version, status |
+| `media_derivatives` | Parent asset, derivative type (normalized image/video, mask, enhanced image, composite), object key, processing version, quality/fidelity signals, status |
 | `schedules` | Location, cadence, local time, enabled state, limits, theme preferences |
 | `events` | Event name, dates, geography, category, source, verification timestamp |
 | `content_jobs` | Schedule run, location, selected assets, theme, state, attempt count, timestamps |
@@ -167,8 +181,8 @@ Represent the content job as explicit states, for example: `queued`, `preprocess
 ## Delivery plan
 
 1. **Accounts and billing foundation:** Configure the Supabase project, salon-account/location tenancy, Auth, RLS, private storage, Stripe products/prices, location subscription checkout, webhook synchronization, and billing tests.
-2. **Media processing:** Add validation, image/video normalization, derived-asset storage, status reporting, and retry controls.
-3. **Scheduled creative:** Add schedule configuration, curated LA event/holiday data, asset selection, script/storyboard drafting, and independent review.
+2. **Media processing:** Add image/video validation, photo blur/lighting/resolution signals, image/video normalization, optional masks and conservative enhancement, derived-asset storage, status reporting, and retry controls.
+3. **Scheduled creative:** Add schedule configuration, curated LA event/holiday data, still-photo-first asset selection, image-to-video and deterministic multi-photo compositions, creative planning, fidelity checks, and independent review.
 4. **Operations dashboards:** Add the technician upload dashboard and leadership cross-location job queue, review workspace, approval audit trail, and publication status.
 5. **Video generation and publishing:** Add one video provider, output validation, generation budgets, human approval, shared TikTok account connection, and publishing with a manual export fallback.
 6. **Production hardening:** Add billing recovery/access policies, monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
