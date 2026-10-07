@@ -205,7 +205,7 @@ export default function Home() {
     }
     const { data: scheduleRows, error: scheduleError } = await supabase
       .from("content_schedule_entries")
-      .select("id, location_id, cycle_number, scheduled_for, season, style_name, technique_and_finish, color_palette")
+      .select("id, location_id, cycle_number, scheduled_for, season, style_name, technique_and_finish, color_palette, approx_date, theme_name, content_style_name, content_hook, event_anchors, research_window, research_prompts, timing_note")
       .in("location_id", ids)
       .order("scheduled_for");
     if (scheduleError) {
@@ -560,13 +560,13 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
 
         <section className="content-card schedule-card">
           {props.isDemo ? <>
-            <div className="section-card-top"><div><span className="card-kicker">COMING UP · SAMPLE</span><h2>{nextTheme?.style_name ?? "Theme schedule"}</h2></div><button className="more-button" aria-label="More options"><MoreHorizontal size={19} /></button></div>
+            <div className="section-card-top"><div><span className="card-kicker">COMING UP · SAMPLE</span><h2>{nextTheme?.theme_name ?? "Theme schedule"}</h2></div><button className="more-button" aria-label="More options"><MoreHorizontal size={19} /></button></div>
             <div className="season-art"><div className="season-sun" /><div className="season-orbit orbit-one" /><div className="season-orbit orbit-two" /><div className="nail-shape nail-one" /><div className="nail-shape nail-two" /><div className="nail-shape nail-three" /><span className="season-caption">soft light <i>·</i> warm tones <i>·</i> you</span></div>
             <div className="schedule-meta"><span><CalendarDays size={15} /> {nextTheme ? formatScheduleDate(nextTheme.scheduled_for) : "Schedule complete"}</span><span className="schedule-dot" /><span>{nextTheme ? `Cycle ${nextTheme.cycle_number} · ${nextTheme.season}` : "Sample theme"}</span></div>
-            <p className="schedule-description">{nextTheme ? `${nextTheme.technique_and_finish} · ${nextTheme.color_palette}` : "The 18-cycle shared content calendar is ready to explore."}</p>
+            <p className="schedule-description">{nextTheme?.content_hook ?? (nextTheme ? `${nextTheme.technique_and_finish} · ${nextTheme.color_palette}` : "The 18-cycle shared content calendar is ready to explore.")}</p>
             <button className="card-link" onClick={props.onCalendar}>Open content calendar <ArrowRight size={15} /></button>
           </> : <>
-            <div className="section-card-top"><div><span className="card-kicker">CONTENT CALENDAR</span><h2>{nextTheme?.style_name ?? "Schedule not loaded yet"}</h2></div><CalendarDays size={18} color="#a17a86" /></div>
+            <div className="section-card-top"><div><span className="card-kicker">CONTENT CALENDAR</span><h2>{nextTheme?.theme_name ?? nextTheme?.style_name ?? "Schedule not loaded yet"}</h2></div><CalendarDays size={18} color="#a17a86" /></div>
             {nextTheme ? <>
               <div className="season-art schedule-empty"><span className="schedule-theme-number">CYCLE {nextTheme.cycle_number}</span><strong>{nextTheme.season}</strong><span>{nextTheme.color_palette}</span></div>
               <div className="schedule-meta"><span><CalendarDays size={15} /> {formatScheduleDate(nextTheme.scheduled_for)}</span><span className="schedule-dot" /><span>Every 3 weeks</span></div>
@@ -697,23 +697,35 @@ function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entr
         <div className="calendar-grid">{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((day) => <span className="weekday" key={day}>{day}</span>)}
           {monthCells.map((cell) => {
             const entry = entriesByDate.get(cell.date);
-            return <button type="button" className={`calendar-day ${!cell.inMonth ? "day-muted" : ""} ${cell.date === todayInLosAngeles() ? "day-today" : ""} ${cell.date === selectedDate ? "day-selected" : ""}`} key={cell.date} onClick={() => setSelectedDate(cell.date)}>
-              <span>{cell.day}</span>{entry && <span className="calendar-event">C{entry.cycle_number} · {entry.style_name}</span>}
+            return <button type="button" aria-label={entry ? `${entry.theme_name ?? entry.style_name}, ${formatScheduleDate(cell.date)}` : formatScheduleDate(cell.date)} className={`calendar-day ${!cell.inMonth ? "day-muted" : ""} ${cell.date === todayInLosAngeles() ? "day-today" : ""} ${cell.date === selectedDate ? "day-selected" : ""}`} key={cell.date} onClick={() => setSelectedDate(cell.date)}>
+              <span>{cell.day}</span>{entry && <span className="calendar-event">C{entry.cycle_number} · {entry.theme_name ?? entry.style_name}</span>}
             </button>;
           })}
         </div>
-        {isDemo && <div className="calendar-sample-note"><Sparkles size={14} /> Sample schedule preview. Apply the calendar migration and rerun bootstrap to load this schedule in Supabase.</div>}
+        {isDemo && <div className="calendar-sample-note"><Sparkles size={14} /> Sample schedule preview. Apply the calendar and research migrations, then rerun bootstrap to load the schedule and research briefs in Supabase.</div>}
+        {!isDemo && entries.some((entry) => !entry.research_prompts?.length) && <div className="calendar-sample-note"><CircleHelp size={14} /> Research briefs are not loaded yet. Rerun <code>supabase/bootstrap.sql</code> after applying the research migration.</div>}
         {!isDemo && entries.length === 0 && <div className="calendar-sample-note"><CircleHelp size={14} /> No schedule entries were found for this location. Apply the calendar migration, then rerun <code>supabase/bootstrap.sql</code>.</div>}
       </section>
       <aside className="content-card moments-card">
         <span className="card-kicker">{selectedEntry ? `CYCLE ${selectedEntry.cycle_number} · ${selectedEntry.season.toUpperCase()}` : "UP NEXT"}</span>
-        <h2>{selectedEntry?.style_name ?? "Upcoming themes"}</h2>
+        <h2>{selectedEntry?.theme_name ?? selectedEntry?.style_name ?? "Upcoming themes"}</h2>
         {selectedEntry ? <div className="selected-theme">
           <div className="moment-item"><div className="moment-date"><strong>{formatScheduleDate(selectedEntry.scheduled_for, { day: "numeric" })}</strong><span>{formatScheduleDate(selectedEntry.scheduled_for, { month: "short" }).toUpperCase()}</span></div><div><strong>{formatScheduleDate(selectedEntry.scheduled_for, { weekday: "long", year: "numeric" })}</strong><span>Los Angeles · every 3 weeks</span></div></div>
+          {selectedEntry.content_hook && <p className="theme-hook">“{selectedEntry.content_hook}”</p>}
+          {selectedEntry.approx_date && <div className="theme-detail"><span>APPROXIMATE CULTURAL DATE</span><strong>{formatScheduleDate(selectedEntry.approx_date, { weekday: "long", year: "numeric" })}</strong></div>}
+          <div className="theme-detail"><span>NAIL STYLE</span><strong>{selectedEntry.style_name}</strong></div>
+          {selectedEntry.content_style_name && selectedEntry.content_style_name !== selectedEntry.style_name && <div className="theme-detail"><span>CONTENT STYLE</span><strong>{selectedEntry.content_style_name}</strong></div>}
           <div className="theme-detail"><span>TECHNIQUE & FINISH</span><strong>{selectedEntry.technique_and_finish}</strong></div>
           <div className="theme-detail"><span>COLOR PALETTE</span><strong>{selectedEntry.color_palette}</strong></div>
+          {selectedEntry.event_anchors?.length ? <div className="theme-detail"><span>EVENT ANCHORS</span><div className="event-anchor-list">{selectedEntry.event_anchors.map((anchor) => <span key={anchor}>{anchor}</span>)}</div></div> : null}
+          {selectedEntry.research_window && <div className="theme-detail"><span>RESEARCH WINDOW</span><strong>{selectedEntry.research_window}</strong></div>}
+          {selectedEntry.research_prompts?.length ? <details className="research-details">
+            <summary>Research brief · {selectedEntry.research_prompts.length} prompts</summary>
+            <ol>{selectedEntry.research_prompts.map((prompt) => <li key={prompt}>{prompt}</li>)}</ol>
+          </details> : null}
+          {selectedEntry.timing_note && <div className="timing-note"><CircleHelp size={14} /><span>{selectedEntry.timing_note}</span></div>}
         </div> : nextEntries.map((entry) => <button className="moment-item moment-button" key={entry.id} onClick={() => { setSelectedDate(entry.scheduled_for); setMonth(new Date(`${entry.scheduled_for}T00:00:00.000Z`)); }}>
-          <div className="moment-date"><strong>{formatScheduleDate(entry.scheduled_for, { day: "numeric" })}</strong><span>{formatScheduleDate(entry.scheduled_for, { month: "short" }).toUpperCase()}</span></div><div><strong>{entry.style_name}</strong><span>Cycle {entry.cycle_number} · {entry.season} · {entry.color_palette}</span></div><span className="moment-indicator" />
+          <div className="moment-date"><strong>{formatScheduleDate(entry.scheduled_for, { day: "numeric" })}</strong><span>{formatScheduleDate(entry.scheduled_for, { month: "short" }).toUpperCase()}</span></div><div><strong>{entry.theme_name ?? entry.style_name}</strong><span>Cycle {entry.cycle_number} · {entry.season} · {entry.content_hook ?? entry.color_palette}</span></div><span className="moment-indicator" />
         </button>)}
         <div className="calendar-hint"><CalendarDays size={16} /><p>{entries.length ? "These are content-planning dates, not customer appointment bookings. Every location shares this theme cadence." : "Load the schedule entries to view the 18 planned themes."}</p></div>
       </aside>

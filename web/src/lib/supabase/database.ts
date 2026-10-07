@@ -26,6 +26,14 @@ export type Database = {
           style_name: string;
           technique_and_finish: string;
           color_palette: string;
+          approx_date: string | null;
+          theme_name: string | null;
+          content_style_name: string | null;
+          content_hook: string | null;
+          event_anchors: string[] | null;
+          research_window: string | null;
+          research_prompts: string[] | null;
+          timing_note: string | null;
           created_at: string;
         },
         {
@@ -37,6 +45,14 @@ export type Database = {
           style_name: string;
           technique_and_finish: string;
           color_palette: string;
+          approx_date?: string | null;
+          theme_name?: string | null;
+          content_style_name?: string | null;
+          content_hook?: string | null;
+          event_anchors?: string[] | null;
+          research_window?: string | null;
+          research_prompts?: string[] | null;
+          timing_note?: string | null;
           created_at?: string;
         }
       >;

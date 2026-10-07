@@ -1,6 +1,6 @@
 begin;
 
-select plan(30);
+select plan(38);
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.salon_accounts'::regclass),
@@ -122,5 +122,13 @@ select ok(
   not has_table_privilege('authenticated', 'public.content_schedule_entries', 'INSERT'),
   'clients cannot modify the provisioned content schedule'
 );
+select has_column('public', 'content_schedule_entries', 'approx_date', 'schedule stores an approximate cultural date');
+select has_column('public', 'content_schedule_entries', 'theme_name', 'schedule stores its editorial theme');
+select has_column('public', 'content_schedule_entries', 'content_style_name', 'schedule stores its content style');
+select has_column('public', 'content_schedule_entries', 'content_hook', 'schedule stores its content hook');
+select has_column('public', 'content_schedule_entries', 'event_anchors', 'schedule stores event anchors');
+select has_column('public', 'content_schedule_entries', 'research_window', 'schedule stores a research window');
+select has_column('public', 'content_schedule_entries', 'research_prompts', 'schedule stores research prompts');
+select has_column('public', 'content_schedule_entries', 'timing_note', 'schedule stores optional timing notes');
 select * from finish();
 rollback;
