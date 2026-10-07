@@ -74,7 +74,7 @@ flowchart TD
 
 ### TikTok publishing
 
-- Connect one shared salon-owned TikTok account using TikTok's current supported OAuth and content-publishing flow. Confirm the app's API access, review/approval requirements, account eligibility, and permitted visibility options before promising automated publication.
+- Connect one shared salon-owned TikTok account using TikTok's current supported OAuth and content-publishing flow. Generate a cryptographically random, single-use OAuth `state` value bound to the authenticated leadership session and intended salon account; validate and consume it on callback before accepting tokens or changing the connected account. Use PKCE where supported. Confirm the app's API access, review/approval requirements, account eligibility, and permitted visibility options before promising automated publication.
 - Keep access/refresh tokens and signing credentials server-side in a secrets manager or appropriately encrypted credential store. Never expose them to the browser or place them in prompts/logs.
 - Publishing is a separate job created only from an explicit leadership approval for a specific immutable video version and destination account. Re-check the approver's account permission and the location's active subscription before enqueueing.
 - Track provider post IDs, status, response/errors, and published URL. Make submission idempotent where the API permits; if an outcome is ambiguous, reconcile provider status before retrying to avoid duplicate posts.
