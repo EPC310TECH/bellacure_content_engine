@@ -5,7 +5,7 @@ declare
   owner_email text := 'admin@stack.report';
   owner_id uuid;
   salon_id uuid;
-  location_id uuid;
+  v_location_id uuid;
   location_names text[] := array[
     'Beverly Hills',
     'Brentwood Village',
@@ -49,10 +49,10 @@ begin
     values (salon_id, location_names[location_number])
     on conflict (salon_account_id, name) do update
       set name = excluded.name
-    returning id into location_id;
+    returning id into v_location_id;
 
     insert into public.location_memberships (location_id, user_id, role)
-    values (location_id, owner_id, 'leadership')
+    values (v_location_id, owner_id, 'leadership')
     on conflict (location_id, user_id) do update
       set role = excluded.role;
   end loop;
