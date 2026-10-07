@@ -2,7 +2,7 @@
 -- Replace this email before running.
 do $$
 declare
-  owner_email text := 'owner@example.com';
+  owner_email text := 'admin@stack.report';
   owner_id uuid;
   salon_id uuid;
   location_id uuid;
