@@ -10,12 +10,14 @@ The initial product should create and queue videos for human review. It should n
 
 - **Web app:** Next.js application for technician uploads, location-scoped media library, schedule configuration, and a generated-content review queue.
 - **Application API:** Authenticated server endpoints for uploads, job creation, schedule management, approvals, and provider callbacks.
-- **Database:** Managed PostgreSQL for locations, users, media metadata, schedules, events, jobs, prompts, review results, and generated outputs.
-- **Object storage:** Private S3-compatible bucket for originals, normalized derivatives, and generated videos. Store object keys and metadata in PostgreSQL, not media bytes.
+- **Application backend:** Supabase Auth for sign-in, PostgreSQL for application data, and private Supabase Storage buckets for originals, normalized derivatives, and generated videos. Store object keys and metadata in PostgreSQL, not media bytes.
+- **Billing:** The service operator's Stripe account sells subscriptions to salon locations. Stripe Checkout handles sign-up and Stripe's customer portal handles payment-method and subscription self-service.
 - **Background processing:** Durable queue and workers for media preprocessing, creative generation, and video generation. Use retries with backoff, idempotent jobs, and dead-letter handling.
 - **Provider adapters:** Keep image/video processing, language models, event feeds, and video-generation APIs behind interfaces so vendors can be changed without changing the workflow.
 
-The deployment provider is intentionally undecided. Choose managed services that provide private object storage, PostgreSQL, a durable queue, and secrets management in the target cloud.
+The application is designed for one salon business with seven locations initially, but the tenant model should support additional salon businesses. Each location has its own subscription. Stripe Connect is not needed when subscription payments go to the service operator; consider Connect only if salons later need to receive payouts through the product.
+
+The hosting provider and worker queue are still undecided. Keep Stripe secret credentials and webhook signing secrets, Supabase server credentials, and AI provider keys in the deployment's secrets manager. Configure account credentials per environment; never commit them or expose server credentials to the browser.
 
 ## End-to-end workflow
 
@@ -73,8 +75,11 @@ Prompts and provider requests must explicitly require: nail-salon imagery and su
 
 | Entity | Purpose and important fields |
 |---|---|
-| `locations` | Seven salon branches; name, timezone, brand settings, active status |
+| `salon_accounts` | Tenant/business record; name, account owner, status |
+| `locations` | Salon branches belonging to an account; name, timezone, brand settings, active status |
 | `users`, `location_memberships` | Identity, role, and locations the user may access |
+| `billing_subscriptions` | Location, Stripe customer/subscription/price IDs, internal status, current period end, cancellation state, last synced time |
+| `stripe_webhook_events` | Stripe event ID, type, received/processed timestamps, processing status, and safe error details for idempotent handling |
 | `media_assets` | Location, uploader, original object key, media type, metadata, consent/AI-use state, lifecycle status |
 | `media_derivatives` | Parent asset, derivative type, object key, processing version, status |
 | `schedules` | Location, cadence, local time, enabled state, limits, theme preferences |
@@ -86,11 +91,24 @@ Prompts and provider requests must explicitly require: nail-salon imagery and su
 
 Use foreign keys and indexes for location-scoped queries and job polling. Keep large media out of database rows. Apply a documented retention policy to originals, derivatives, prompts, and rejected generations.
 
+## Supabase and Stripe integration
+
+- Supabase is the application's system of record for salon accounts, location membership, media metadata, schedules, generation jobs, and the locally synchronized subscription entitlements. Supabase Auth identifies users; PostgreSQL Row Level Security (RLS) enforces salon-account and location access. Never treat a user-editable profile field or client-supplied location ID as proof of authorization.
+- Enable RLS on every exposed application table and storage bucket. Policies must check the user's server-managed membership and role for the relevant salon account/location. Keep Stripe IDs and billing state read-only to client roles; only the trusted billing backend may update them.
+- Store uploaded and generated media in private buckets. Authorize access against location membership and issue short-lived signed URLs rather than making media public.
+- Create one Stripe customer per salon business and one Stripe subscription per paid location. A Checkout Session is created server-side for the chosen location and price; use trusted server-side records/metadata to map the resulting Stripe subscription back to that location. Never accept a client-provided Stripe customer, price, subscription, or entitlement as authoritative.
+- Add a server-side Stripe webhook endpoint. Verify the Stripe signature against the raw request body, persist each event ID before processing, and make processing idempotent. Handle subscription create/update/delete and invoice paid/payment-failed events; safely account for retries and out-of-order delivery, and reconcile against Stripe's canonical subscription state before changing access.
+- The verified billing state controls location-level entitlements, including whether that location can upload media, run scheduled generation, or use other paid features. The browser may display subscription status but cannot grant access. Define the payment-failure grace period and cancellation cutoff before launch.
+- Provide a link to Stripe's hosted customer portal for billing self-service. Do not handle or store card numbers in the application. The product's Stripe account is for collecting SaaS fees; Stripe Connect is only needed if the product later routes money to salons.
+
 ## Suggested API surface
 
 - `POST /api/uploads` — authorize a location and create a restricted upload target.
 - `POST /api/media/{id}/complete` — verify upload completion and enqueue preprocessing.
 - `GET /api/media` — list assets only from locations accessible to the caller.
+- `POST /api/billing/checkout` — create a server-authorized Checkout Session for a location and configured price.
+- `POST /api/billing/portal` — create a customer portal session for the authenticated salon account.
+- `POST /api/stripe/webhook` — verify, persist, and idempotently process Stripe billing events.
 - `POST /api/schedules` / `PATCH /api/schedules/{id}` — create and manage location schedules.
 - `POST /api/content-jobs` — request an authorized one-off run or enqueue a scheduled run.
 - `GET /api/content-jobs/{id}` — return state and review artifacts.
@@ -106,7 +124,8 @@ Represent the job as explicit states, for example: `queued`, `preprocessing`, `r
 ## Security, privacy, and operational controls
 
 - Enforce role and location access on every API and storage operation. Use private buckets, short-lived signed URLs, encryption in transit/at rest, and least-privilege worker credentials.
-- Validate uploads and generated provider callbacks; rate-limit upload and generation endpoints; record audit events for approvals, access changes, and AI generation.
+- Enforce tenant and location boundaries in Supabase RLS as well as in API authorization. Keep Supabase server credentials and Stripe secret/webhook keys server-side only; expose only Supabase's client-safe project configuration to the browser.
+- Verify Stripe webhook signatures and provider callbacks, persist event IDs for idempotency, rate-limit upload and generation endpoints, and record audit events for approvals, access changes, billing changes, and AI generation.
 - Get appropriate consent before uploading identifiable customer media. Provide deletion workflows for originals and derivatives and confirm each AI provider's retention/training terms before sending salon content.
 - Store API credentials in a secrets manager. Do not put secrets in prompts, browser code, database logs, or source control.
 - Track queue depth, stage latency, provider errors, retry counts, generation spend, and failed content checks. Provide a per-location kill switch for scheduled generation.
@@ -114,15 +133,17 @@ Represent the job as explicit states, for example: `queued`, `preprocessing`, `r
 
 ## Delivery plan
 
-1. **Foundation:** Configure the seven locations, authentication/roles, private storage, database, upload flow, and location-scoped media library.
+1. **Accounts and billing foundation:** Configure the Supabase project, salon-account/location tenancy, Auth, RLS, private storage, Stripe products/prices, location subscription checkout, webhook synchronization, and billing tests.
 2. **Media processing:** Add validation, image/video normalization, derived-asset storage, status reporting, and retry controls.
 3. **Scheduled creative:** Add schedule configuration, curated LA event/holiday data, asset selection, script/storyboard drafting, and independent review.
 4. **Video generation and review:** Add one video provider, output validation, generation budgets, and human approval/export.
-5. **Production hardening:** Add monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
+5. **Production hardening:** Add billing recovery/access policies, monitoring, deletion/retention controls, provider failover decisions, load/cost testing, and a limited pilot across locations.
 
 ## Decisions required before implementation
 
 - Hosting/cloud and managed database/object-storage/queue vendor.
+- Whether a failed payment triggers a grace period, what features remain available during it, and when canceled access ends.
+- Per-location product tiers, pricing, trial policy, and who is allowed to start or cancel a location subscription.
 - AI text/review and video-generation providers, including data retention and commercial-use terms.
 - Whether technician uploads may include identifiable customers, and the required consent/retention policy.
 - Schedule cadence and per-location generation budget.
