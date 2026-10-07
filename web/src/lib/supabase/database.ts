@@ -71,6 +71,7 @@ export type Database = {
           size_bytes: number;
           ai_consent_confirmed: boolean;
           status: "uploaded" | "processing" | "ready" | "needs_attention" | "failed";
+          preview_object_path: string | null;
           created_at: string;
         },
         {
@@ -83,6 +84,7 @@ export type Database = {
           size_bytes: number;
           ai_consent_confirmed?: boolean;
           status?: "uploaded" | "processing" | "ready" | "needs_attention" | "failed";
+          preview_object_path?: string | null;
           created_at?: string;
         }
       >;
@@ -98,6 +100,13 @@ export type Database = {
           reviewed_by: string | null;
           reviewed_at: string | null;
           review_note: string | null;
+          attempt_count: number;
+          last_error: string | null;
+          next_attempt_at: string;
+          locked_at: string | null;
+          lease_token: string | null;
+          derived_object_path: string | null;
+          processed_at: string | null;
           created_at: string;
         },
         {
@@ -111,6 +120,13 @@ export type Database = {
           reviewed_by?: string | null;
           reviewed_at?: string | null;
           review_note?: string | null;
+          attempt_count?: number;
+          last_error?: string | null;
+          next_attempt_at?: string;
+          locked_at?: string | null;
+          lease_token?: string | null;
+          derived_object_path?: string | null;
+          processed_at?: string | null;
           created_at?: string;
         }
       >;
@@ -140,6 +156,25 @@ export type Database = {
       review_content_job: {
         Args: { p_job_id: string; p_decision: "approved" | "rejected" | "changes_requested"; p_note?: string | null };
         Returns: Database["public"]["Tables"]["content_jobs"]["Row"];
+      };
+      claim_next_media_job: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          job_id: string;
+          location_id: string;
+          media_asset_id: string;
+          uploaded_by: string;
+          object_path: string;
+          original_name: string;
+          declared_mime_type: string;
+          size_bytes: number;
+          attempt_count: number;
+          worker_lease: string;
+        }[];
+      };
+      finish_media_job: {
+        Args: { p_job_id: string; p_worker_lease: string; p_preview_object_path?: string | null; p_error?: string | null };
+        Returns: boolean;
       };
     };
     Enums: { [_ in never]: never };

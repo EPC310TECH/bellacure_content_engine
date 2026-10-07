@@ -1,6 +1,6 @@
 begin;
 
-select plan(38);
+select plan(52);
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.salon_accounts'::regclass),
@@ -130,5 +130,45 @@ select has_column('public', 'content_schedule_entries', 'event_anchors', 'schedu
 select has_column('public', 'content_schedule_entries', 'research_window', 'schedule stores a research window');
 select has_column('public', 'content_schedule_entries', 'research_prompts', 'schedule stores research prompts');
 select has_column('public', 'content_schedule_entries', 'timing_note', 'schedule stores optional timing notes');
+select has_column('public', 'media_assets', 'preview_object_path', 'processed previews have a separate private object path');
+select has_column('public', 'content_jobs', 'attempt_count', 'processing jobs track retry attempts');
+select has_column('public', 'content_jobs', 'last_error', 'processing jobs retain their latest error');
+select has_column('public', 'content_jobs', 'next_attempt_at', 'processing retries can be delayed');
+select has_column('public', 'content_jobs', 'locked_at', 'processing jobs track lease time');
+select has_column('public', 'content_jobs', 'lease_token', 'processing jobs are protected by lease tokens');
+select has_column('public', 'content_jobs', 'derived_object_path', 'processing jobs track preview output separately from generated video');
+select has_column('public', 'content_jobs', 'processed_at', 'processing completion time is recorded');
+select ok(
+  has_function_privilege('service_role', 'public.claim_next_media_job()', 'EXECUTE'),
+  'only the worker service role can claim media jobs'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.claim_next_media_job()', 'EXECUTE'),
+  'authenticated users cannot claim media jobs'
+);
+select ok(
+  has_function_privilege('service_role', 'public.finish_media_job(uuid,uuid,text,text)', 'EXECUTE'),
+  'the worker service role can finalize media jobs'
+);
+select ok(
+  not has_function_privilege('anon', 'public.finish_media_job(uuid,uuid,text,text)', 'EXECUTE'),
+  'anonymous users cannot finalize media jobs'
+);
+select ok(
+  not has_function_privilege('authenticated', 'public.finish_media_job(uuid,uuid,text,text)', 'EXECUTE'),
+  'authenticated users cannot finalize media jobs'
+);
+select ok(
+  exists (
+    select 1
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'Uploaders can remove files without a media record'
+      and cmd = 'DELETE'
+      and qual ilike '%preview_object_path%'
+  ),
+  'users cannot delete a preview linked to a media asset'
+);
 select * from finish();
 rollback;

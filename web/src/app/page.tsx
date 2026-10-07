@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { ChangeEvent, DragEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -46,6 +47,7 @@ type Asset = {
   created_at: string;
   location_id: string;
   object_path?: string;
+  preview_object_path?: string | null;
   mime_type?: string;
   demo?: boolean;
 };
@@ -57,6 +59,8 @@ type ContentJob = {
   location_id: string;
   media_asset_id: string;
   generated_object_path: string | null;
+  attempt_count: number;
+  last_error: string | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
   review_note?: string | null;
@@ -112,7 +116,9 @@ function StatusPill({ status }: { status: string }) {
     ? "status-ready"
     : status === "processing" || status === "Composing"
       ? "status-progress"
-      : "status-queued";
+      : status === "failed" || status === "rejected"
+        ? "status-failed"
+        : "status-queued";
   return <span className={`status-pill ${style}`}><span className="status-dot" />{status.replaceAll("_", " ")}</span>;
 }
 
@@ -183,7 +189,7 @@ export default function Home() {
     setLocationId((current) => availableLocations.some((location) => location.id === current) ? current : availableLocations[0]?.id ?? "");
     const { data: assetRows, error: assetsError } = await supabase
       .from("media_assets")
-      .select("id, original_name, status, created_at, location_id, object_path, mime_type")
+      .select("id, original_name, status, created_at, location_id, object_path, preview_object_path, mime_type")
       .in("location_id", ids)
       .order("created_at", { ascending: false })
       .limit(100);
@@ -194,7 +200,7 @@ export default function Home() {
     }
     const { data: jobRows, error: jobsError } = await supabase
       .from("content_jobs")
-      .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, reviewed_by, reviewed_at, review_note")
+      .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, attempt_count, last_error, reviewed_by, reviewed_at, review_note")
       .in("location_id", ids)
       .order("created_at", { ascending: false })
       .limit(25);
@@ -295,7 +301,7 @@ export default function Home() {
           size_bytes: file.size,
           ai_consent_confirmed: true,
         })
-        .select("id, original_name, status, created_at, location_id, object_path, mime_type")
+        .select("id, original_name, status, created_at, location_id, object_path, preview_object_path, mime_type")
         .single();
       if (insertError) {
         const { error: cleanupError } = await supabase.storage.from("salon-media").remove([objectPath]);
@@ -310,7 +316,7 @@ export default function Home() {
           media_asset_id: insertedAsset.id,
           created_by: userData.user.id,
         })
-        .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, reviewed_by, reviewed_at, review_note")
+        .select("id, status, stage, created_at, location_id, media_asset_id, generated_object_path, attempt_count, last_error, reviewed_by, reviewed_at, review_note")
         .single();
       if (jobError) {
         setErrorMessage(`Your file was uploaded, but its queue record could not be created: ${jobError.message}. It remains in your media library.`);
@@ -454,6 +460,7 @@ export default function Home() {
           )}
           {section === "uploads" && (
             <Uploads
+              supabase={supabase}
               isDemo={isDemo}
               assets={selectedAssets}
               uploading={uploading}
@@ -583,7 +590,7 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
           <div className="asset-table">
             {props.jobs.slice(0, 4).map((job) => {
               const asset = props.assets.find((item) => item.id === job.media_asset_id);
-              return <div className="asset-row" key={job.id}><div className="asset-thumb"><FileKind name={asset?.original_name ?? "Queued media"} /></div><div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")}</span></div><StatusPill status={job.status} /></div>;
+              return <div className="asset-row" key={job.id}><div className="asset-thumb"><FileKind name={asset?.original_name ?? "Queued media"} /></div><div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")} · {job.attempt_count}/3 attempts</span>{job.last_error && <span className="job-error">{job.last_error}</span>}</div><StatusPill status={job.status} /></div>;
             })}
           </div>
         ) : <EmptyState icon={<ImagePlus size={20} />} title="Your first upload starts here" description="Add a photo of your latest set and it will appear in this space." />}
@@ -592,7 +599,7 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
   );
 }
 
-function Uploads(props: UploadProps) {
+function Uploads(props: UploadProps & { supabase: ReturnType<typeof createClient> | null }) {
   return (
     <>
       <section className="content-card upload-page-card">
@@ -601,10 +608,43 @@ function Uploads(props: UploadProps) {
       </section>
       <section className="content-card library-card">
         <div className="list-heading"><div><span className="card-kicker">YOUR ORIGINALS</span><h2>Recently added</h2></div><button className="filter-button"><span className="status-dot" /> All media <ChevronDown size={14} /></button></div>
-        {props.assets.length ? <div className="library-grid">{props.assets.map((asset, index) => <article className="library-item" key={asset.id}><div className={`library-art art-${index % 4}`}><DecorativeNails variant={index % 4} /><span className="library-kind">{asset.original_name.toLowerCase().endsWith(".mp4") ? <Video size={13} /> : <ImagePlus size={13} />}</span><button className="play-preview" aria-label={`Preview ${asset.original_name}`}><Play size={15} fill="currentColor" /></button></div><div className="library-caption"><div><strong>{asset.original_name}</strong><span>{formatDate(asset.created_at)}</span></div><StatusPill status={asset.status} /></div></article>)}</div> : <EmptyState icon={<ImagePlus size={20} />} title="Your library is ready for its first photo" description="Upload your favorite finished set to get started." />}
+        {props.assets.length ? <div className="library-grid">{props.assets.map((asset, index) => <LibraryAssetCard key={asset.id} asset={asset} index={index} supabase={props.supabase} />)}</div> : <EmptyState icon={<ImagePlus size={20} />} title="Your library is ready for its first photo" description="Upload your favorite finished set to get started." />}
       </section>
     </>
   );
+}
+
+function LibraryAssetCard({ asset, index, supabase }: { asset: Asset; index: number; supabase: ReturnType<typeof createClient> | null }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPreview() {
+      if (!supabase || !asset.preview_object_path) return;
+      const { data, error } = await supabase.storage.from("salon-media").createSignedUrl(asset.preview_object_path, 900);
+      if (cancelled) return;
+      if (error) {
+        setPreviewError(error.message);
+        console.error(`Could not load preview for ${asset.id}: ${error.message}`);
+        return;
+      }
+      setPreviewUrl(data.signedUrl);
+    }
+    void loadPreview();
+    return () => { cancelled = true; };
+  }, [asset.id, asset.preview_object_path, supabase]);
+
+  return <article className="library-item">
+    <div className={`library-art art-${index % 4}`}>
+      {previewUrl ? <Image className="library-preview-image" src={previewUrl} alt={`Processed preview for ${asset.original_name}`} fill sizes="(max-width: 560px) 50vw, 25vw" unoptimized />
+        : <DecorativeNails variant={index % 4} />}
+      <span className="library-kind">{asset.original_name.toLowerCase().endsWith(".mp4") ? <Video size={13} /> : <ImagePlus size={13} />}</span>
+      {asset.preview_object_path && <span className="preview-ready-label"><Check size={11} /> Preview ready</span>}
+      {previewError && <span className="preview-error-label">Preview unavailable</span>}
+    </div>
+    <div className="library-caption"><div><strong>{asset.original_name}</strong><span>{formatDate(asset.created_at)}</span></div><StatusPill status={asset.status} /></div>
+  </article>;
 }
 
 function Jobs({ isDemo, isLeadership, jobs, assets, locations, onReview }: { isDemo: boolean; isLeadership: boolean; jobs: ContentJob[]; assets: Asset[]; locations: Location[]; onReview: (job?: ContentJob) => void }) {
@@ -650,7 +690,7 @@ function Jobs({ isDemo, isLeadership, jobs, assets, locations, onReview }: { isD
             const canReview = isLeadership && job.status === "ready_for_review" && Boolean(job.generated_object_path);
             return <div className="asset-row" key={job.id}>
               <div className="asset-thumb"><FileKind name={asset?.original_name ?? "Queued media"} /></div>
-              <div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{locationName} · {formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")}</span></div>
+              <div className="asset-info"><strong>{asset?.original_name ?? "Salon media"}</strong><span>{locationName} · {formatDate(job.created_at)} · {job.stage.replaceAll("_", " ")} · {job.attempt_count}/3 attempts</span>{job.last_error && <span className="job-error">{job.last_error}</span>}</div>
               <StatusPill status={job.status} />
               {canReview && <button className="button-secondary review-action" onClick={() => onReview(job)}><ShieldCheck size={14} /> Review video</button>}
               {job.status === "ready_for_review" && !job.generated_object_path && <span className="review-pending-note">Video file unavailable</span>}

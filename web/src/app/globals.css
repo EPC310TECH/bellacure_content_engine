@@ -175,7 +175,7 @@ h1, h2, p { margin-top: 0; }
 .job-separator { margin: 0 5px; color: #d2c7cb; }
 .status-pill { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; border-radius: 5px; padding: 5px 7px; font-size: 8px; font-weight: 600; white-space: nowrap; }
 .status-dot { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
-.status-ready { background: #eff5ef; color: #718b73; }.status-progress { background: #f5f0e6; color: #9b8255; }.status-queued { background: #f1edf4; color: #827193; }
+.status-ready { background: #eff5ef; color: #718b73; }.status-progress { background: #f5f0e6; color: #9b8255; }.status-queued { background: #f1edf4; color: #827193; }.status-failed { background: #fbefed; color: #a45d58; }
 .job-play { position: absolute; right: 4px; bottom: 4px; display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid rgb(255 255 255 / 65%); border-radius: 50%; background: rgb(255 255 255 / 85%); color: #81616b; }
 .review-button { display: flex; align-items: center; gap: 5px; border: 1px solid #eadfe3; border-radius: 6px; background: #fff; padding: 7px 9px; color: #795c68; font-size: 8px; font-weight: 700; }
 .job-more { color: #b5a9af; }
@@ -212,6 +212,9 @@ h1, h2, p { margin-top: 0; }
 .library-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .library-item { min-width: 0; overflow: hidden; border: 1px solid #f0eaec; border-radius: 9px; }
 .library-art { position: relative; display: grid; height: 140px; place-items: center; overflow: hidden; }
+.library-preview-image { object-fit: cover; }
+.preview-ready-label, .preview-error-label { position: absolute; right: 7px; bottom: 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 12px; background: rgb(255 255 255 / 88%); padding: 5px 7px; color: #6c846d; font-size: 7px; }
+.preview-error-label { color: #a45d58; }
 .art-0 { background: radial-gradient(circle at 25% 20%, #fff1e8, transparent 35%), linear-gradient(140deg, #f5dfdd, #e9d3cc); }
 .art-1 { background: radial-gradient(circle at 65% 18%, #fcf2e9, transparent 35%), linear-gradient(140deg, #e8deef, #eeded8); }
 .art-2 { background: radial-gradient(circle at 45% 18%, #fff4e8, transparent 35%), linear-gradient(140deg, #f2e2d1, #e6cabe); }
@@ -232,6 +235,7 @@ h1, h2, p { margin-top: 0; }
 .full-jobs-card .job-row { min-height: 75px; }
 .worker-note { display: flex; align-items: center; gap: 7px; margin: 12px 2px 4px; border-top: 1px solid #f1ebed; padding: 12px 0 3px; color: #a0959b; font-size: 8px; }
 .worker-note svg { flex: 0 0 auto; color: #b1909b; }
+.job-error { display: block; overflow: hidden; max-width: 100%; color: #a45d58 !important; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-layout, .settings-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(250px, .8fr); gap: 15px; }
 .calendar-card { padding: 18px; }
 .calendar-controls { display: flex; align-items: center; gap: 3px; }
