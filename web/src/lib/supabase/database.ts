@@ -176,6 +176,25 @@ export type Database = {
         Args: { p_job_id: string; p_worker_lease: string; p_preview_object_path?: string | null; p_error?: string | null };
         Returns: boolean;
       };
+      add_shared_content_schedule_entry: {
+        Args: {
+          p_location_id: string;
+          p_scheduled_for: string;
+          p_season: "Fall" | "Winter" | "Spring" | "Summer";
+          p_style_name: string;
+          p_technique_and_finish: string;
+          p_color_palette: string;
+          p_approx_date?: string | null;
+          p_theme_name?: string | null;
+          p_content_style_name?: string | null;
+          p_content_hook?: string | null;
+          p_event_anchors?: string[] | null;
+          p_research_window?: string | null;
+          p_research_prompts?: string[] | null;
+          p_timing_note?: string | null;
+        };
+        Returns: number;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

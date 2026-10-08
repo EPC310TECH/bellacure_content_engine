@@ -1,6 +1,6 @@
 begin;
 
-select plan(52);
+select plan(57);
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.salon_accounts'::regclass),
@@ -120,7 +120,53 @@ select ok(
 );
 select ok(
   not has_table_privilege('authenticated', 'public.content_schedule_entries', 'INSERT'),
-  'clients cannot modify the provisioned content schedule'
+  'clients cannot insert schedule entries directly'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.add_shared_content_schedule_entry(uuid,date,text,text,text,text,date,text,text,text,text[],text,text[],text)',
+    'EXECUTE'
+  ),
+  'authenticated users can add shared themes through the guarded function'
+);
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.add_shared_content_schedule_entry(uuid,date,text,text,text,text,date,text,text,text,text[],text,text[],text)',
+    'EXECUTE'
+  ),
+  'anonymous users cannot add shared themes'
+);
+select ok(
+  not exists (
+    select 1
+    from pg_proc as proc
+    cross join lateral pg_catalog.aclexplode(coalesce(
+      proc.proacl,
+      pg_catalog.acldefault('f', proc.proowner)
+    )) as privilege
+    where proc.oid = 'public.add_shared_content_schedule_entry(uuid,date,text,text,text,text,date,text,text,text,text[],text,text[],text)'::regprocedure
+      and privilege.grantee = 0
+      and privilege.privilege_type = 'EXECUTE'
+  ),
+  'the shared-theme function is not executable by PUBLIC'
+);
+select ok(
+  (select prosecdef
+   from pg_proc
+   where oid = 'public.add_shared_content_schedule_entry(uuid,date,text,text,text,text,date,text,text,text,text[],text,text[],text)'::regprocedure),
+  'the shared-theme function inserts the seven-location schedule atomically'
+);
+select ok(
+  (select exists (
+     select 1
+     from pg_catalog.unnest(proconfig) as setting(value)
+     where setting.value in ('search_path=', 'search_path=""')
+   )
+   from pg_proc
+   where oid = 'public.add_shared_content_schedule_entry(uuid,date,text,text,text,text,date,text,text,text,text[],text,text[],text)'::regprocedure),
+  'the shared-theme function uses an empty search path'
 );
 select has_column('public', 'content_schedule_entries', 'approx_date', 'schedule stores an approximate cultural date');
 select has_column('public', 'content_schedule_entries', 'theme_name', 'schedule stores its editorial theme');

@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ChangeEvent, DragEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { demoSchedule, type ScheduleEntry } from "@/lib/content-schedule";
@@ -172,6 +172,7 @@ export default function Home() {
   const isDemo = !configured;
   const currentLocation = locations.find((location) => location.id === locationId);
   const isLeadership = !isDemo && currentLocation?.role === "leadership";
+  const canAddTheme = isLeadership || (isDemo && currentLocation?.role === "leadership");
 
   const loadWorkspace = useCallback(async () => {
     if (!supabase) return;
@@ -505,7 +506,15 @@ export default function Home() {
             />
           )}
           {section === "jobs" && <Jobs isDemo={isDemo} isLeadership={isLeadership || isDemo} jobs={isLeadership ? jobs : jobs.filter((job) => job.location_id === locationId)} assets={assets} locations={locations} onReview={(job) => job ? setReviewJob(job) : setReviewPreviewOpen(true)} />}
-          {section === "calendar" && <CalendarView isDemo={isDemo} entries={scheduleEntries.filter((entry) => entry.location_id === locationId)} locationName={currentLocation?.name ?? "Selected location"} />}
+          {section === "calendar" && <CalendarView
+            isDemo={isDemo}
+            canAddTheme={canAddTheme}
+            entries={scheduleEntries.filter((entry) => entry.location_id === locationId)}
+            locationId={locationId}
+            locationName={currentLocation?.name ?? "Selected location"}
+            supabase={supabase}
+            onCreated={loadWorkspace}
+          />}
           {section === "settings" && <SettingsView isDemo={isDemo} configured={configured} />}
         </div>
         <footer className="page-footer"><span>Made with care for the work you do.</span><span><ShieldCheck size={14} /> Your originals always stay yours</span></footer>
@@ -806,9 +815,39 @@ function Jobs({ isDemo, isLeadership, jobs, assets, locations, onReview }: { isD
   );
 }
 
-function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entries: ScheduleEntry[]; locationName: string }) {
+function CalendarView({
+  isDemo,
+  canAddTheme,
+  entries,
+  locationId,
+  locationName,
+  supabase,
+  onCreated,
+}: {
+  isDemo: boolean;
+  canAddTheme: boolean;
+  entries: ScheduleEntry[];
+  locationId: string;
+  locationName: string;
+  supabase: ReturnType<typeof createClient> | null;
+  onCreated: () => Promise<void>;
+}) {
   const [month, setMonth] = useState(() => new Date(Date.UTC(2026, 9, 1)));
   const [selectedDate, setSelectedDate] = useState("2026-10-06");
+  const [draftEntries, setDraftEntries] = useState<ScheduleEntry[]>([]);
+  const [addingEntry, setAddingEntry] = useState(false);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [entryError, setEntryError] = useState("");
+  const [entryMessage, setEntryMessage] = useState("");
+  const [formDate, setFormDate] = useState("2026-10-06");
+  const [formSeason, setFormSeason] = useState<ScheduleEntry["season"]>("Fall");
+  const [ideaTheme, setIdeaTheme] = useState("");
+  const [ideaStyle, setIdeaStyle] = useState("");
+  const [ideaTechnique, setIdeaTechnique] = useState("");
+  const [ideaPalette, setIdeaPalette] = useState("");
+  const [contentHook, setContentHook] = useState("");
+  const [formResetKey, setFormResetKey] = useState(0);
+  const visibleEntries = [...entries, ...draftEntries];
   const year = month.getUTCFullYear();
   const monthIndex = month.getUTCMonth();
   const firstWeekday = (new Date(Date.UTC(year, monthIndex, 1)).getUTCDay() + 6) % 7;
@@ -818,13 +857,132 @@ function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entr
     const date = new Date(Date.UTC(year, monthIndex, index - firstWeekday + 1));
     return { date: date.toISOString().slice(0, 10), day: date.getUTCDate(), inMonth: date.getUTCMonth() === monthIndex };
   });
-  const entriesByDate = new Map(entries.map((entry) => [entry.scheduled_for, entry]));
+  const entriesByDate = new Map(visibleEntries.map((entry) => [entry.scheduled_for, entry]));
   const selectedEntry = entriesByDate.get(selectedDate);
-  const nextEntries = entries.filter((entry) => entry.scheduled_for >= todayInLosAngeles()).slice(0, 3);
+  const nextEntries = visibleEntries.filter((entry) => entry.scheduled_for >= todayInLosAngeles()).slice(0, 3);
   const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(month);
 
   function moveMonth(amount: number) {
     setMonth((current) => new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + amount, 1)));
+  }
+
+  function seasonForDate(dateString: string): ScheduleEntry["season"] {
+    const monthIndex = new Date(`${dateString}T00:00:00.000Z`).getUTCMonth();
+    if ([11, 0, 1].includes(monthIndex)) return "Winter";
+    if ([2, 3, 4].includes(monthIndex)) return "Spring";
+    if ([5, 6, 7].includes(monthIndex)) return "Summer";
+    return "Fall";
+  }
+
+  function openAddEntry() {
+    const start = new Date(`${selectedDate}T00:00:00.000Z`);
+    let candidate = start;
+    for (let day = 0; day < 366; day += 1) {
+      const dateString = candidate.toISOString().slice(0, 10);
+      if (!entriesByDate.has(dateString)) {
+        setFormDate(dateString);
+        setFormSeason(seasonForDate(dateString));
+        setSelectedDate(dateString);
+        setMonth(new Date(Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth(), 1)));
+        break;
+      }
+      candidate = new Date(Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth(), candidate.getUTCDate() + 1));
+    }
+    setEntryError("");
+    setIdeaTheme("");
+    setIdeaStyle("");
+    setIdeaTechnique("");
+    setIdeaPalette("");
+    setContentHook("");
+    setAddingEntry(true);
+    setFormResetKey((key) => key + 1);
+  }
+
+  const contentIdea = `A silent, text-free nail-art reel for ${ideaTheme.trim() || "this theme"}: open on a close-up of ${ideaStyle.trim() || "the finished manicure"}, show ${ideaTechnique.trim() || "the technique and finish"} catching the light against ${ideaPalette.trim() || "the chosen color palette"}, then end on the completed set.`.slice(0, 500);
+
+  async function saveEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setEntryError("");
+    setEntryMessage("");
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const value = (key: string) => String(formData.get(key) ?? "").trim();
+    const lines = (key: string) => value(key).split("\n").map((line) => line.trim()).filter(Boolean);
+    const draft = {
+      scheduled_for: value("scheduled_for"),
+      season: value("season") as ScheduleEntry["season"],
+      theme_name: value("theme_name"),
+      content_style_name: value("content_style_name") || null,
+      style_name: value("style_name"),
+      technique_and_finish: value("technique_and_finish"),
+      color_palette: value("color_palette"),
+      approx_date: value("approx_date") || null,
+      content_hook: value("content_hook") || null,
+      event_anchors: lines("event_anchors"),
+      research_window: value("research_window") || null,
+      research_prompts: lines("research_prompts"),
+      timing_note: value("timing_note") || null,
+    };
+
+    if (isDemo && canAddTheme) {
+      const cycleNumber = Math.max(0, ...visibleEntries.map((entry) => entry.cycle_number)) + 1;
+      const newEntry: ScheduleEntry = {
+        ...draft,
+        id: `demo-custom-${Date.now()}`,
+        location_id: locationId,
+        cycle_number: cycleNumber,
+      };
+      setDraftEntries((current) => [...current, newEntry]);
+      setSelectedDate(draft.scheduled_for);
+      setAddingEntry(false);
+      setEntryMessage("Preview only: this theme was added locally and will disappear when the preview is refreshed.");
+      return;
+    }
+
+    if (!supabase || !canAddTheme) {
+      setEntryError("Only location leadership can add a shared calendar theme.");
+      return;
+    }
+    if (entriesByDate.has(draft.scheduled_for)) {
+      setEntryError("A theme already exists on that date. Choose another calendar day.");
+      return;
+    }
+
+    setSavingEntry(true);
+    try {
+      const { data: insertedCount, error } = await supabase.rpc("add_shared_content_schedule_entry", {
+        p_location_id: locationId,
+        p_scheduled_for: draft.scheduled_for,
+        p_season: draft.season,
+        p_style_name: draft.style_name,
+        p_technique_and_finish: draft.technique_and_finish,
+        p_color_palette: draft.color_palette,
+        p_approx_date: draft.approx_date,
+        p_theme_name: draft.theme_name,
+        p_content_style_name: draft.content_style_name,
+        p_content_hook: draft.content_hook,
+        p_event_anchors: draft.event_anchors,
+        p_research_window: draft.research_window,
+        p_research_prompts: draft.research_prompts,
+        p_timing_note: draft.timing_note,
+      });
+      if (error) {
+        setEntryError(`Could not add the shared theme: ${error.message}`);
+        return;
+      }
+      if (!insertedCount) {
+        setEntryError("The theme was not added to any salon calendars.");
+        return;
+      }
+      await onCreated();
+      setSelectedDate(draft.scheduled_for);
+      setAddingEntry(false);
+      setEntryMessage(`Theme added to ${insertedCount} salon ${insertedCount === 1 ? "calendar" : "calendars"}.`);
+    } catch (error) {
+      setEntryError(`Could not add the shared theme: ${error instanceof Error ? error.message : "Unexpected network error."}`);
+    } finally {
+      setSavingEntry(false);
+    }
   }
 
   return (
@@ -833,6 +991,7 @@ function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entr
         <div className="list-heading">
           <div><span className="card-kicker">{isDemo ? "SAMPLE CONTENT SCHEDULE" : `${locationName.toUpperCase()} · CONTENT SCHEDULE`}</span><h2>{monthLabel}</h2><p>One salon theme every three weeks · shared across all seven locations.</p></div>
           <div className="calendar-controls">
+            {canAddTheme && <button className="button-primary calendar-add-button" onClick={openAddEntry}><Plus size={14} /> Add theme</button>}
             <button className="icon-button" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={17} /></button>
             <button className="icon-button" aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={17} /></button>
           </div>
@@ -846,6 +1005,8 @@ function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entr
           })}
         </div>
         {isDemo && <div className="calendar-sample-note"><Sparkles size={14} /> Sample schedule preview. Apply the calendar and research migrations, then rerun bootstrap to load the schedule and research briefs in Supabase.</div>}
+        {entryMessage && <div className="calendar-sample-note"><Check size={14} /> {entryMessage}</div>}
+        {entryError && !addingEntry && <div className="inline-error" role="alert"><X size={15} />{entryError}</div>}
         {!isDemo && entries.some((entry) => !entry.research_prompts?.length) && <div className="calendar-sample-note"><CircleHelp size={14} /> Research briefs are not loaded yet. Rerun <code>supabase/bootstrap.sql</code> after applying the research migration.</div>}
         {!isDemo && entries.length === 0 && <div className="calendar-sample-note"><CircleHelp size={14} /> No schedule entries were found for this location. Apply the calendar migration, then rerun <code>supabase/bootstrap.sql</code>.</div>}
       </section>
@@ -872,6 +1033,38 @@ function CalendarView({ isDemo, entries, locationName }: { isDemo: boolean; entr
         </button>)}
         <div className="calendar-hint"><CalendarDays size={16} /><p>{entries.length ? "These are content-planning dates, not customer appointment bookings. Every location shares this theme cadence." : "Load the schedule entries to view the 18 planned themes."}</p></div>
       </aside>
+      {addingEntry && <div className="review-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingEntry) setAddingEntry(false); }}>
+        <section className="review-dialog calendar-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="add-theme-title">
+          <header className="review-dialog-header">
+            <div><span className="card-kicker">{isDemo ? "PREVIEW ONLY" : "SHARED SALON CALENDAR"}</span><h2 id="add-theme-title">Add a content theme</h2></div>
+            <button className="icon-button" aria-label="Close add theme form" onClick={() => setAddingEntry(false)} disabled={savingEntry}><X size={19} /></button>
+          </header>
+          <div className="review-preview-banner"><CalendarDays size={14} /> {isDemo ? "This is a local preview; it will not be saved." : "This theme will be added to all locations in the salon account."}</div>
+          <form key={formResetKey} className="calendar-entry-form" onSubmit={saveEntry}>
+            <div className="calendar-form-grid">
+              <label>Scheduled date<input type="date" name="scheduled_for" value={formDate} onChange={(event) => { setFormDate(event.target.value); setFormSeason(seasonForDate(event.target.value)); }} required /></label>
+              <label>Season<select name="season" value={formSeason} onChange={(event) => setFormSeason(event.target.value as ScheduleEntry["season"])}><option>Fall</option><option>Winter</option><option>Spring</option><option>Summer</option></select></label>
+              <label className="calendar-form-wide">Theme name<input name="theme_name" maxLength={120} required placeholder="e.g. Velvet After Dark" value={ideaTheme} onChange={(event) => setIdeaTheme(event.target.value)} /></label>
+              <label>Nail style<input name="style_name" maxLength={160} required placeholder="e.g. Sculpted chrome lines" value={ideaStyle} onChange={(event) => setIdeaStyle(event.target.value)} /></label>
+              <label>Content style <span>optional</span><input name="content_style_name" maxLength={160} placeholder="Editorial name, if different" /></label>
+              <label className="calendar-form-wide">Technique & finish<input name="technique_and_finish" maxLength={300} required placeholder="e.g. Magnetic gel, velvet finish" value={ideaTechnique} onChange={(event) => setIdeaTechnique(event.target.value)} /></label>
+              <label className="calendar-form-wide">Color palette<input name="color_palette" maxLength={200} required placeholder="e.g. Charcoal and plum" value={ideaPalette} onChange={(event) => setIdeaPalette(event.target.value)} /></label>
+              <label>Approximate cultural date <span>optional</span><input type="date" name="approx_date" /></label>
+              <label>Research window <span>optional</span><input name="research_window" maxLength={120} placeholder="e.g. Two weeks before shoot" /></label>
+              <div className="calendar-content-idea calendar-form-wide">
+                <div><span className="card-kicker">CONTENT IDEA SUGGESTION</span><p>{contentIdea}</p><small>Silent visual concept · no speech or on-screen text</small></div>
+                <button type="button" className="button-secondary" onClick={() => setContentHook(contentIdea)}>Use idea</button>
+              </div>
+              <label className="calendar-form-wide">Content hook / idea <span>optional · edit the suggestion as needed</span><textarea name="content_hook" value={contentHook} onChange={(event) => setContentHook(event.target.value)} maxLength={500} rows={3} placeholder="Use the suggestion above or write your own idea" /></label>
+              <label className="calendar-form-wide">Event anchors <span>one per line · optional</span><textarea name="event_anchors" maxLength={1609} rows={2} placeholder={"LA event or seasonal moment\nHoliday / cultural anchor"} /></label>
+              <label className="calendar-form-wide">Research prompts <span>one per line · optional</span><textarea name="research_prompts" maxLength={6009} rows={3} placeholder={"What is trending for this theme?\nWhat local events are coming up?"} /></label>
+              <label className="calendar-form-wide">Timing note <span>optional</span><textarea name="timing_note" maxLength={1000} rows={2} placeholder="Any context about timing or styling" /></label>
+            </div>
+            {entryError && <div className="inline-error" role="alert"><X size={15} />{entryError}</div>}
+            <footer className="calendar-form-actions"><span>New themes continue the cycle numbering.</span><div><button type="button" className="button-secondary" onClick={() => setAddingEntry(false)} disabled={savingEntry}>Cancel</button><button type="submit" className="button-primary" disabled={savingEntry}>{savingEntry ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{savingEntry ? "Saving…" : "Add to calendar"}</button></div></footer>
+          </form>
+        </section>
+      </div>}
     </div>
   );
 }
