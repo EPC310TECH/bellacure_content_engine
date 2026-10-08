@@ -12,6 +12,12 @@ For an existing project that already has the earlier migrations, run `2026100703
 6. Copy `.env.example` to `.env.local` and fill in the Supabase project URL and publishable key. The publishable key is intended for browser use; never place a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
 7. From this directory, run `npm run dev` and open the local address printed by Next.js. Sign in with the leadership account or a technician account added to `location_memberships`.
 
+## Mindbody mock insights function
+
+`supabase/functions/mindbody-insights` is an authenticated Edge Function that returns clearly labeled synthetic appointment-demand and availability aggregates for the seven locations. It makes no Mindbody network requests and contains no credentials or customer-level data. The function requires a valid signed-in Supabase user JWT; JWT verification remains enabled in `supabase/config.toml`.
+
+Run its mock-data tests with `deno test supabase/functions/mindbody-insights/mock-data_test.ts`. To serve or deploy the Edge Function, use the Supabase CLI from the repository root after linking the correct Supabase project. Local serving requires the Supabase local stack and Docker. The mock dataset is illustrative only and must not be presented as real Mindbody activity.
+
 The migrations create the private `salon-media` bucket, location-scoped RLS policies, upload/job metadata, a membership-protected content schedule with editorial hooks and timely research prompts, retry-safe media processing fields and service-role-only worker functions, and the generated-video review history. Users can upload JPG, PNG, WebP, and MP4 files up to 50 MB after confirming they have permission to use the media. Uploads are stored in paths scoped to location and uploader; client roles cannot alter job state or schedule entries. The worker verifies media signatures, checks recorded sizes, and writes an idempotent derived JPEG under a separate path; originals remain unchanged. MP4 files currently produce a still-frame preview only. No background removal, AI alterations, generated videos, or spoken/text content are created by this worker. The review function requires a generated video and records every approval, rejection, or request for changes. Approved videos are for manual export only. The calendar shows planned content themes, not customer appointment bookings; dates do not trigger generation or research jobs.
 
 ## Build status

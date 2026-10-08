@@ -65,6 +65,24 @@ type ContentJob = {
   reviewed_at?: string | null;
   review_note?: string | null;
 };
+type LocationInsight = {
+  location_id: string;
+  location_name: string;
+  sample_period: string;
+  appointments_booked: number;
+  open_slots_next_7_days: number;
+  booking_fill_rate_percent: number;
+  top_services: Array<{ service: string; bookings: number }>;
+  busiest_day: string;
+  busiest_time_block: string;
+  content_opportunity: string;
+};
+type InsightsResponse = {
+  source: "mock";
+  is_mock_data: true;
+  notice: string;
+  locations: LocationInsight[];
+};
 
 const locationNames = [
   "Beverly Hills",
@@ -75,6 +93,15 @@ const locationNames = [
   "Studio City",
   "Sunset",
 ];
+const mindbodyLocationSlugs: Record<string, string> = {
+  "Beverly Hills": "beverly-hills",
+  "Brentwood Village": "brentwood-village",
+  "Larchmont Village": "larchmont-village",
+  "Santa Monica": "santa-monica",
+  "South Bay": "south-bay",
+  "Studio City": "studio-city",
+  Sunset: "sunset",
+};
 
 const demoLocations: Location[] = locationNames.map((name, index) => ({
   id: `demo-${index + 1}`,
@@ -440,6 +467,8 @@ export default function Home() {
             <Overview
               isDemo={isDemo}
               isLeadership={isLeadership || isDemo}
+              supabase={supabase}
+              locationName={currentLocation?.name ?? "Selected location"}
               assets={selectedAssets}
               jobs={jobs.filter((job) => job.location_id === locationId)}
               scheduleEntries={scheduleEntries.filter((entry) => entry.location_id === locationId)}
@@ -540,7 +569,7 @@ function UploadDropzone({ isDemo, uploading, uploadMessage, errorMessage, consen
   );
 }
 
-function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob[]; scheduleEntries: ScheduleEntry[]; onJobs: () => void; onUploads: () => void; onCalendar: () => void }) {
+function Overview(props: UploadProps & { isLeadership: boolean; supabase: ReturnType<typeof createClient> | null; locationName: string; jobs: ContentJob[]; scheduleEntries: ScheduleEntry[]; onJobs: () => void; onUploads: () => void; onCalendar: () => void }) {
   const ready = props.assets.filter((asset) => asset.status === "ready").length;
   const queueCount = props.isDemo ? 3 : props.jobs.filter((job) => job.status !== "approved" && job.status !== "rejected").length;
   const reviewCount = props.jobs.filter((job) => job.status === "ready_for_review").length;
@@ -584,6 +613,8 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
         </section>
       </div>
 
+      {props.isLeadership && <MindbodyInsightsPanel supabase={props.supabase} isDemo={props.isDemo} locationName={props.locationName} />}
+
       <section className="content-card jobs-card">
         <div className="list-heading"><div><span className="card-kicker">{props.isLeadership ? "STUDIO QUEUE" : "YOUR RECENT WORK"}</span><h2>{props.isLeadership ? "A little progress, everywhere." : "Recently added"}</h2></div><button className="card-link" onClick={props.onJobs}>View all <ArrowRight size={15} /></button></div>
         {props.isDemo ? <JobRows onClick={props.onJobs} /> : props.jobs.length ? (
@@ -596,6 +627,78 @@ function Overview(props: UploadProps & { isLeadership: boolean; jobs: ContentJob
         ) : <EmptyState icon={<ImagePlus size={20} />} title="Your first upload starts here" description="Add a photo of your latest set and it will appear in this space." />}
       </section>
     </>
+  );
+}
+
+function MindbodyInsightsPanel({ supabase, isDemo, locationName }: { supabase: ReturnType<typeof createClient> | null; isDemo: boolean; locationName: string }) {
+  const [insight, setInsight] = useState<LocationInsight | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadInsights() {
+      if (isDemo || !supabase) {
+        setInsight(null);
+        setError("");
+        return;
+      }
+      const locationSlug = mindbodyLocationSlugs[locationName];
+      if (!locationSlug) {
+        setInsight(null);
+        setError("There is no mock-insights mapping for this location.");
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      const { data, error: functionError } = await supabase.functions.invoke<InsightsResponse>("mindbody-insights", {
+        method: "POST",
+        body: { location_id: locationSlug },
+      });
+      if (cancelled) return;
+      setLoading(false);
+      if (functionError) {
+        setInsight(null);
+        setError(`Could not load insights: ${functionError.message}`);
+        return;
+      }
+      if (!data?.is_mock_data || data.source !== "mock" || !Array.isArray(data.locations)) {
+        setInsight(null);
+        setError("The insights function returned an unexpected response.");
+        return;
+      }
+      setInsight(data.locations.find((item) => item.location_id === locationSlug) ?? null);
+      if (!data.locations.some((item) => item.location_id === locationSlug)) {
+        setError("No mock insights are available for this location.");
+      }
+    }
+    void loadInsights();
+    return () => { cancelled = true; };
+  }, [isDemo, locationName, supabase]);
+
+  return (
+    <section className="content-card insights-card">
+      <div className="list-heading">
+        <div><span className="card-kicker">MINDBODY · MOCK DATA</span><h2>Demand signals for {locationName}</h2><p>Illustrative aggregates to prototype content planning. No live Mindbody data.</p></div>
+        <span className="mock-data-badge"><Sparkles size={13} /> SAMPLE ONLY</span>
+      </div>
+      {isDemo ? <div className="insights-message">Sign in to preview the authenticated Supabase Edge Function.</div>
+        : loading ? <div className="insights-message"><LoaderCircle className="spin" size={16} /> Loading sample insights…</div>
+          : error ? <div className="insights-error" role="alert">{error}</div>
+            : insight ? <>
+              <div className="insights-metrics">
+                <div><span>Sample appointments</span><strong>{insight.appointments_booked}</strong><small>{insight.sample_period}</small></div>
+                <div><span>Open slots · next 7 days</span><strong>{insight.open_slots_next_7_days}</strong><small>{insight.booking_fill_rate_percent}% sample fill rate</small></div>
+                <div><span>Busiest time</span><strong>{insight.busiest_time_block}</strong><small>{insight.busiest_day}</small></div>
+              </div>
+              <div className="insights-bottom">
+                <div><span className="insights-label">SAMPLE TOP SERVICES</span><p>{insight.top_services.map((service) => `${service.service} (${service.bookings})`).join(" · ")}</p></div>
+                <div><span className="insights-label">CONTENT IDEA</span><p>{insight.content_opportunity}</p></div>
+              </div>
+              <div className="insights-disclaimer">Mock data only · No Mindbody API was contacted · No customer information</div>
+            </> : <div className="insights-message">No sample data is available for this location.</div>}
+    </section>
   );
 }
 
